@@ -1,0 +1,65 @@
+{
+  "id": "smime",
+  "name": "S/MIME",
+  "version": "1.0.1",
+  "author": "Bulwark Mail Community",
+  "description": "End-to-end S/MIME for webmail: sign and encrypt outgoing messages, and automatically verify signatures and decrypt incoming CMS (PKCS#7) mail. Private keys are imported from a PKCS#12 (.p12/.pfx) file, encrypted at rest with a passphrase, and unlocked into non-extractable WebCrypto keys that never leave your browser. Runs in the privileged (same-origin) plugin tier so all cryptography happens locally with bundled pkijs/asn1js.",
+  "type": "ui-extension",
+  "tier": "privileged",
+  "permissions": [
+    "crypto:full",
+    "email:blob-read",
+    "email:raw-send",
+    "email:render-takeover",
+    "email:read",
+    "email:send",
+    "smime:read",
+    "ui:composer-toolbar",
+    "ui:email-banner",
+    "ui:settings-section",
+    "app:lifecycle"
+  ],
+  "entrypoint": "index.js",
+  "minAppVersion": "1.7.6",
+  "icon": "media/icon.svg",
+  "banner": "media/banner.svg",
+  "settingsSchema": {
+    "encryptionStrength": {
+      "type": "select",
+      "label": "Content encryption algorithm",
+      "description": "Symmetric cipher used to encrypt the message body. AES-256-GCM is recommended; AES-128-GCM is slightly smaller and still strong.",
+      "default": "aes-256",
+      "options": ["aes-256", "aes-128"]
+    },
+    "autoImportSignerCerts": {
+      "type": "boolean",
+      "label": "Auto-save signer certificates",
+      "description": "When a validly signed message is opened, remember the signer's certificate so you can later send them encrypted mail without importing it manually.",
+      "default": true
+    },
+    "lockOnLogout": {
+      "type": "boolean",
+      "label": "Lock keys on logout",
+      "description": "Wipe all unlocked private keys from memory when you sign out or switch accounts. Leave on unless you have a specific reason not to.",
+      "default": true
+    },
+    "warnOnSelfSigned": {
+      "type": "boolean",
+      "label": "Warn on self-signed signer",
+      "description": "Show a caution banner when an incoming signature validates against a self-signed certificate (not chained to a trusted CA).",
+      "default": true
+    }
+  },
+  "locales": {
+    "en": {
+      "banner.signed_valid": "Signature valid",
+      "banner.signed_invalid": "Signature invalid",
+      "banner.encrypted": "Encrypted message",
+      "banner.decrypted": "Decrypted",
+      "banner.locked": "Encrypted — unlock your key to read",
+      "toolbar.sign": "Sign",
+      "toolbar.encrypt": "Encrypt",
+      "settings.title": "S/MIME keys & certificates"
+    }
+  }
+}
