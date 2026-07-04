@@ -1,12 +1,12 @@
 {
-  "name": "bulwark-plugin-smime",
+  "name": "bulwark-plugin-openpgp",
   "version": "1.0.0",
   "private": true,
   "type": "module",
   "scripts": {
-    "build": "esbuild src/index.js --bundle --format=cjs --platform=browser --charset=utf8 --alias:crypto=./src/node-crypto-shim.js --outfile=dist/index.js --external:react --external:react-dom --external:react-dom/client --external:react/jsx-runtime --external:@plugin-host",
+    "build": "esbuild ./src/index.tsx --bundle --format=cjs --platform=browser --charset=utf8 --alias:crypto=./src/node-crypto-shim.js --outfile=dist/index.js --external:react --external:react-dom --external:react-dom/client --external:react/jsx-runtime --external:@plugin-host",
     "dev": "npm run build -- --watch",
-    "package": "npm run build && cp manifest.json dist/ && cd dist && zip -X ../smime.zip manifest.json index.js"
+    "package": "npm run build && cp manifest.json dist/ && cd dist && zip -X ../openpgp.zip manifest.json index.js"
   },
   "dependencies": {
     "asn1js": "^3.0.10",

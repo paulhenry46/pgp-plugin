@@ -37,7 +37,7 @@ export async function pgpDecrypt(input: { cmsBytes: Uint8Array, keyRecords: KeyR
   }
 
   // 2. Détermination des candidats capables de déchiffrer le message
-  const matchedRecords = findMatchingKeyRecords(parsedMessage, keyRecords);
+  const matchedRecords = await findMatchingKeyRecords(parsedMessage, keyRecords);
   if (matchedRecords.length === 0) {
     throw new Error("Aucune clé OpenPGP importée ne correspond aux destinataires de ce message chiffré.");
   }
@@ -63,7 +63,7 @@ export async function pgpDecrypt(input: { cmsBytes: Uint8Array, keyRecords: KeyR
 
   // 4. Gestion des clés verrouillées (Demande d'UI via l'exception)
   // Si on arrive ici, aucune clé déverrouillée n'a fonctionné. On vérifie s'il y a des candidats dormants.
-  const lockedRecord = matchedRecords.find((record) => !unlockedKeys.has(record.id));
+  const lockedRecord = (await matchedRecords).find((record:any) => !unlockedKeys.has(record.id));
   if (lockedRecord) {
     throw new PgpKeyLockedError(
       'La clé PGP est verrouillée. Veuillez saisir votre phrase de passe pour déchiffrer.',
@@ -82,7 +82,7 @@ export async function findDecryptionCandidates(cmsBytes: Uint8Array, keyRecords:
   try {
     const armoredMessage = normalizePgpMessage(cmsBytes);
     const parsedMessage = await openpgp.readMessage({ armoredMessage });
-    return findMatchingKeyRecords(parsedMessage, keyRecords).map((r) => r.id);
+    return (await findMatchingKeyRecords(parsedMessage, keyRecords)).map((r) => r.id);
   } catch (e) {
     console.warn('Failed to find decryption candidates:', e);
     return [];
@@ -93,20 +93,37 @@ export async function findDecryptionCandidates(cmsBytes: Uint8Array, keyRecords:
  * Filtre les keyRecords de l'utilisateur pour trouver ceux dont le Key ID correspond
  * à l'un des Key IDs cibles intégrés dans les paquets du message PGP.
  */
-function findMatchingKeyRecords(parsedMessage : openpgp.Message<string>, keyRecords: KeyRecord[]) {
-  // openpgp.js expose les ID de clés requis sous forme de tableau d'objets KeyID
+
+
+export async function findMatchingKeyRecords(
+  parsedMessage: openpgp.Message<string> | openpgp.Message<Uint8Array>, 
+  keyRecords: KeyRecord[]
+): Promise<KeyRecord[]> {
+  // 1. Extraire les Key IDs (en hexadécimal majuscule) qui ont servi à chiffrer le message
   const encryptionKeyIds = parsedMessage.getEncryptionKeyIDs().map(id => id.toHex().toUpperCase());
   
-  const matches = [];
+  const matches: KeyRecord[] = [];
+
   for (const record of keyRecords) {
-    if (!record.keyID) continue;
-    
-    // Un enregistrement correspond si son KeyID principal ou sa sous-clé est listé dans le message
-    const cleanRecordKeyId = record.keyID.toUpperCase();
-    if (encryptionKeyIds.includes(cleanRecordKeyId)) {
-      matches.push(record);
+    if (!record.publicKey) continue;
+
+    try {
+      // 2. Parser la clé publique stockée pour obtenir ses véritables Key IDs (clé principale + sous-clés)
+      const keyInstance = await openpgp.readKey({ armoredKey: record.publicKey });
+      const recordKeyIds = keyInstance.getKeyIDs().map(id => id.toHex().toUpperCase());
+
+      // 3. Vérifier si l'un des Key IDs de cette clé correspond à ceux demandés par le message chiffré
+      const hasMatch = recordKeyIds.some(id => encryptionKeyIds.includes(id));
+
+      if (hasMatch) {
+        matches.push(record);
+      }
+    } catch (err) {
+      // On ignore une clé mal formée dans le stockage pour ne pas bloquer le reste de la boucle
+      console.error(`Failed to parse public key for record ${record.id}:`, err);
     }
   }
+
   return matches;
 }
 

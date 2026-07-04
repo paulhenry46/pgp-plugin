@@ -1,3 +1,4 @@
+"use strict";
 var __create = Object.create;
 var __defProp = Object.defineProperty;
 var __getOwnPropDesc = Object.getOwnPropertyDescriptor;
@@ -13068,7 +13069,7 @@ var init_openpgp_min = __esm({
   }
 });
 
-// src/index.js
+// src/index.tsx
 var index_exports = {};
 __export(index_exports, {
   activate: () => activate,
@@ -13078,6 +13079,8 @@ __export(index_exports, {
   slots: () => slots
 });
 module.exports = __toCommonJS(index_exports);
+var import_plugin_host = __toESM(require("@plugin-host"), 1);
+var import_react = __toESM(require("react"), 1);
 
 // node_modules/js-base64/base64.mjs
 var version = "3.8.0";
@@ -13584,7 +13587,7 @@ function c() {
   return new d(h);
 }
 
-// src/util.js
+// src/util.ts
 function generateUUID() {
   if (typeof crypto !== "undefined" && typeof crypto.randomUUID === "function") {
     return crypto.randomUUID();
@@ -13596,7 +13599,7 @@ function generateUUID() {
   return hex.slice(0, 4).join("") + "-" + hex.slice(4, 6).join("") + "-" + hex.slice(6, 8).join("") + "-" + hex.slice(8, 10).join("") + "-" + hex.slice(10, 16).join("");
 }
 
-// src/pgp-mime-builder.js
+// src/pgp-mime-builder.ts
 var CRLF = "\r\n";
 function buildMimeMessage(input) {
   const msg = c();
@@ -13609,11 +13612,11 @@ function buildMimeMessage(input) {
   if (input.messageId) {
     msg.setHeader("Message-ID", input.messageId);
   }
-  if (input.textBody) msg.setMessage(input.textBody);
-  if (input.htmlBody) msg.setHTML(input.htmlBody);
+  if (input.textBody) msg.addMessage({ contentType: "text/plain", data: input.textBody });
+  if (input.htmlBody) msg.addMessage({ contentType: "text/html", data: input.htmlBody });
   if (input.attachments?.length) {
     for (const att of input.attachments) {
-      msg.setAttachment(att.filename, att.contentType, base64EncodeRaw(att.content));
+      msg.addAttachment({ filename: att.filename, contentType: att.contentType, data: base64EncodeRaw(att.content) });
     }
   }
   const rawMimeString = msg.asRaw();
@@ -13733,10 +13736,10 @@ function base64EncodeRaw(data) {
   return btoa(binary);
 }
 
-// src/pgp-sign.js
+// src/pgp-sign.ts
 init_openpgp_min();
 async function pgpSignInline(mimeBytes, unlockedPrivateKey) {
-  if (!unlockedPrivateKey || typeof unlockedPrivateKey.sign !== "function") {
+  if (!unlockedPrivateKey || !unlockedPrivateKey.isDecrypted || !unlockedPrivateKey.isDecrypted()) {
     throw new Error("Une clé privée OpenPGP valide et déverrouillée est requise pour signer.");
   }
   const message = await ao({ binary: mimeBytes });
@@ -13748,6 +13751,9 @@ async function pgpSignInline(mimeBytes, unlockedPrivateKey) {
   return new TextEncoder().encode(armoredSignedMessage);
 }
 async function pgpSignDetached(mimeBytes, unlockedPrivateKey) {
+  if (!unlockedPrivateKey || !unlockedPrivateKey.isDecrypted || !unlockedPrivateKey.isDecrypted()) {
+    throw new Error("Une clé privée OpenPGP valide et déverrouillée est requise pour signer.");
+  }
   const message = await ao({ binary: mimeBytes });
   const armoredSignature = await mo({
     message,
@@ -13758,7 +13764,7 @@ async function pgpSignDetached(mimeBytes, unlockedPrivateKey) {
   return new Blob([armoredSignature], { type: 'application/pgp-signature; name="signature.asc"' });
 }
 
-// src/pgp-encrypt.js
+// src/pgp-encrypt.ts
 init_openpgp_min();
 async function pgpEncrypt(mimeBytes, recipientPublicKeysArmored, senderPublicKeyArmored, useAes1282) {
   const allKeyStrings = deduplicateKeys([...recipientPublicKeysArmored, senderPublicKeyArmored]);
@@ -13782,7 +13788,9 @@ async function pgpEncrypt(mimeBytes, recipientPublicKeysArmored, senderPublicKey
   const encryptedArmored = await Ao({
     message,
     encryptionKeys,
-    config: { preferredSymmetricAlgorithms: [algorithm] }
+    config: {
+      preferredSymmetricAlgorithm: algorithm
+    }
   });
   return new Blob([encryptedArmored], { type: "application/pgp-encrypted; charset=utf-8" });
 }
@@ -13800,54 +13808,35 @@ function deduplicateKeys(keys) {
   return result;
 }
 
-// src/pgp-verify.js
+// src/pgp-verify.ts
 init_openpgp_min();
 
-// src/pgp-key-utils.js
+// src/pgp-key-utils.ts
 init_openpgp_min();
-function extractAlgorithm(key) {
-  try {
-    const info = key.getAlgorithmInfo();
-    if (info.bits) {
-      return `${info.algorithm.toUpperCase()}-${info.bits}`;
-    }
-    return info.algorithm.toUpperCase();
-  } catch {
-    return "UNKNOWN";
-  }
-}
-function extractEmailAddresses(key) {
-  const emails = [];
-  const userIDs = key.getUserIDs();
-  for (const userId of userIDs) {
-    if (!userId) continue;
-    const emailMatch = userId.match(/<([^>]+)>/);
-    if (emailMatch && emailMatch[1]) {
-      const email = emailMatch[1].toLowerCase().trim();
-      if (!emails.includes(email)) {
-        emails.push(email);
-      }
-    }
-  }
-  return emails;
-}
 function classifyCapabilities(key) {
   let canSign = false;
   let canEncrypt = false;
-  const keysToEvaluate = [key, ...key.getSubkeys()];
-  for (const k2 of keysToEvaluate) {
+  try {
+    if (typeof key.canSign === "function") {
+      canSign = key.canSign();
+    } else {
+      canSign = !!key.keyPacket.algorithm;
+    }
+    if (typeof key.getEncryptionKeyPacket === "function") {
+      canEncrypt = true;
+    }
+  } catch {
+    canSign = false;
+    canEncrypt = false;
+  }
+  if (!canSign && !canEncrypt) {
     try {
-      const flags = k2.getFlags();
-      if (flags) {
-        if (flags.sign) canSign = true;
-        if (flags.encryptWholeMessage || flags.encryptCommunication) canEncrypt = true;
-      }
-    } catch {
-      const algInfo = k2.getAlgorithmInfo();
-      if (algInfo.algorithm === "rsa") {
+      const algName = String(key.getAlgorithmInfo?.().algorithm || "").toLowerCase();
+      if (algName.includes("rsa")) {
         canSign = true;
         canEncrypt = true;
       }
+    } catch {
     }
   }
   return { canSign, canEncrypt };
@@ -13855,55 +13844,73 @@ function classifyCapabilities(key) {
 async function extractKeyInfo(key) {
   const fingerprint = key.getFingerprint();
   const keyID = key.getKeyID().toHex().toUpperCase();
-  const emails = extractEmailAddresses(key);
+  const emails = typeof globalThis.extractEmailAddresses === "function" ? globalThis.extractEmailAddresses(key) : [];
   const capabilities = classifyCapabilities(key);
   const primaryUser = await key.getPrimaryUser();
   const subject = primaryUser?.user?.userID?.userID || emails[0] || "Unknown PGP User";
-  const expirationTime = await key.getExpirationTime();
-  const creationTime = key.getCreationTime();
+  const creationTimeRaw = key.getCreationTime();
+  const creationDate = creationTimeRaw instanceof Date ? creationTimeRaw : new Date(creationTimeRaw);
+  const expirationTimeRaw = await key.getExpirationTime();
+  let expirationIso = null;
+  if (expirationTimeRaw && expirationTimeRaw !== Infinity) {
+    const expirationDate = expirationTimeRaw instanceof Date ? expirationTimeRaw : new Date(expirationTimeRaw);
+    expirationIso = expirationDate.toISOString();
+  }
+  const fingerprintMatches = fingerprint.match(/.{1,4}/g);
+  const formattedFingerprint = fingerprintMatches ? fingerprintMatches.join(":") : fingerprint;
+  let algorithmName = "Unknown";
+  try {
+    if (typeof key.getAlgorithmInfo === "function") {
+      algorithmName = String(key.getAlgorithmInfo().algorithm);
+    }
+  } catch {
+  }
+  let armoredPublicKey = "";
+  try {
+    const publicKeyInstance = key.isPrivate() ? key.toPublic() : key;
+    armoredPublicKey = publicKeyInstance.armor();
+  } catch (err) {
+    console.error("Failed to export armored public key string from instance", err);
+  }
   return {
     subject,
-    // Contient le User ID principal complet "Nom <email>"
     issuer: "Self-Signed (OpenPGP Web of Trust)",
-    // Les clés PGP s'auto-signent
     serialNumber: keyID,
-    // L'identifiant court/long fait office de numéro de série
-    notBefore: creationTime.toISOString(),
-    notAfter: expirationTime ? expirationTime.toISOString() : null,
-    // PGP autorise les clés sans expiration
-    fingerprint: fingerprint.match(/.{1,4}/g).join(":"),
-    // Formatage lisible XXXX:XXXX:XXXX...
-    algorithm: extractAlgorithm(key),
+    notBefore: creationDate.toISOString(),
+    notAfter: expirationIso,
+    fingerprint: formattedFingerprint,
+    algorithm: algorithmName,
     keyUsage: capabilities.canSign ? ["digitalSignature"] : [],
     extendedKeyUsage: [],
     emailAddresses: emails,
-    capabilities
+    capabilities,
+    armoredPublicKey
+    // Ajout de la propriété attendue par pgp-import.ts
   };
 }
 
-// src/pgp-verify.js
-async function pgpVerify(contentBytes, fromHeader, pgpSignatureBlock = null) {
+// src/pgp-verify.ts
+async function pgpVerify(contentBytes, fromHeader, pgpSignatureBlock = null, knownPublicKeys = []) {
   let verificationResult;
   let mimeBytes = contentBytes;
   try {
     if (pgpSignatureBlock) {
       const message = await ao({ binary: contentBytes });
       const signature = await Ea({ armoredSignature: pgpSignatureBlock });
-      const verificationKeys = await signature.getSigningKeyIDs();
       verificationResult = await bo({
         message,
         signature,
-        verificationKeys: []
-        // openpgp va chercher à apparier via les signatures publiques connues ou récupérées
+        verificationKeys: knownPublicKeys
+        // On passe les clés connues ici pour la validation
       });
     } else {
       const textContent = new TextDecoder("utf-8", { fatal: false }).decode(contentBytes);
       const message = await so({ armoredMessage: textContent });
       verificationResult = await bo({
         message,
-        verificationKeys: [],
+        verificationKeys: knownPublicKeys,
+        // On passe les clés connues ici aussi
         format: "binary"
-        // Permet de récupérer le flux de données natif
       });
       mimeBytes = verificationResult.data;
     }
@@ -13933,7 +13940,14 @@ async function pgpVerify(contentBytes, fromHeader, pgpSignatureBlock = null) {
         signatureValid = false;
         signatureError = err instanceof Error ? err.message : "Signature cryptographique invalide";
       }
-      const signingKey = sig.signingKey;
+      const signerKeyID = sig.keyID.toHex().toUpperCase();
+      let signingKey = null;
+      for (const key of knownPublicKeys) {
+        if (key.getKeyID().toHex().toUpperCase() === signerKeyID) {
+          signingKey = key;
+          break;
+        }
+      }
       if (signingKey) {
         const keyInfo = await extractKeyInfo(signingKey);
         const signerEmail = keyInfo.emailAddresses[0] ?? "";
@@ -13957,13 +13971,18 @@ async function pgpVerify(contentBytes, fromHeader, pgpSignatureBlock = null) {
         if (fromHeader && signerEmail) {
           signerEmailMatch = fromHeader.toLowerCase().trim() === signerEmail.toLowerCase().trim();
         }
+      } else {
+        signatureValid = false;
+        if (!signatureError) {
+          signatureError = `Clé publique inconnue ou absente du trousseau local (Key ID: ${signerKeyID}).`;
+        }
       }
     } else {
       signatureError = "Aucune signature valide trouvée dans la structure OpenPGP";
     }
   } catch (err) {
     signatureValid = false;
-    signatureError = "Erreur lors du traitement des métadonnées de signature: " + err.message;
+    signatureError = "Erreur lors du traitement des métadonnées de signature: " + (err instanceof Error ? err.message : String(err));
   }
   return {
     mimeBytes,
@@ -13973,17 +13992,16 @@ async function pgpVerify(contentBytes, fromHeader, pgpSignatureBlock = null) {
       signatureValid,
       signatureError,
       signerCert: signerPublicRecord,
-      // On garde la dénomination structurelle pour limiter les impacts de refactoring UI
       signerEmailMatch,
       selfSigned: true
-      // En PGP, toutes les signatures de confiance sont portées par auto-signature (Web of Trust)
     }
   };
 }
 
-// src/pgp-decrypt.js
+// src/pgp-decrypt.ts
 init_openpgp_min();
 var PgpKeyLockedError = class extends Error {
+  keyRecordId;
   constructor(message, keyRecordId) {
     super(message);
     this.name = "PgpKeyLockedError";
@@ -13997,7 +14015,7 @@ async function pgpDecrypt(input) {
   try {
     parsedMessage = await so({ armoredMessage });
   } catch (e2) {
-    throw new Error("Impossible de parser le message OpenPGP : " + e2.message);
+    throw new Error("Impossible de parser le message OpenPGP : " + (e2 instanceof Error ? e2.message : String(e2)));
   }
   const matchedRecords = findMatchingKeyRecords(parsedMessage, keyRecords);
   if (matchedRecords.length === 0) {
@@ -14019,9 +14037,8 @@ async function pgpDecrypt(input) {
       continue;
     }
   }
-  const hasLockedMatch = matchedRecords.some((record) => !unlockedKeys.has(record.id));
-  if (hasLockedMatch) {
-    const lockedRecord = matchedRecords.find((record) => !unlockedKeys.has(record.id));
+  const lockedRecord = matchedRecords.find((record) => !unlockedKeys.has(record.id));
+  if (lockedRecord) {
     throw new PgpKeyLockedError(
       "La clé PGP est verrouillée. Veuillez saisir votre phrase de passe pour déchiffrer.",
       lockedRecord.id
@@ -14030,7 +14047,7 @@ async function pgpDecrypt(input) {
   throw new Error("Échec du déchiffrement du message avec les clés disponibles.");
 }
 function findMatchingKeyRecords(parsedMessage, keyRecords) {
-  const encryptionKeyIds = parsedMessage.getReaderEncryptionKeyIDs().map((id) => id.toHex().toUpperCase());
+  const encryptionKeyIds = parsedMessage.getEncryptionKeyIDs().map((id) => id.toHex().toUpperCase());
   const matches = [];
   for (const record of keyRecords) {
     if (!record.keyID) continue;
@@ -14042,7 +14059,7 @@ function findMatchingKeyRecords(parsedMessage, keyRecords) {
   return matches;
 }
 function normalizePgpMessage(raw) {
-  if (!raw || raw.byteLength === 0) return "";
+  if (!raw || typeof raw === "string" && raw.trim() === "") return "";
   let text = typeof raw === "string" ? raw : new TextDecoder("utf-8", { fatal: false }).decode(raw);
   text = text.trim();
   if (text.includes("-----BEGIN PGP MESSAGE-----")) {
@@ -14058,7 +14075,7 @@ ${cleanedBase64}
   return text;
 }
 
-// src/pgp-detect.js
+// src/pgp-detect.ts
 function detectPgp(contentType, bodyStructure, attachments, textBody) {
   const noResult = { type: null, supported: false };
   if (textBody && typeof textBody === "string") {
@@ -14075,19 +14092,21 @@ function detectPgp(contentType, bodyStructure, attachments, textBody) {
       const part = findPgpMimePart(bodyStructure, "application/pgp-encrypted");
       return {
         type: "pgp-mime-encrypted",
-        blobId: part?.blobId,
+        blobId: bodyStructure?.blobId || part?.blobId,
+        // On préfère le blob global pour le déchiffrement complet
         partId: part?.partId,
         supported: true
       };
     }
     if (ct2.includes("multipart/signed") && ct2.includes('protocol="application/pgp-signature"')) {
-      const part = findPgpMimePart(bodyStructure, "application/pgp-signature");
+      const sigPart = findPgpMimePart(bodyStructure, "application/pgp-signature");
+      const contentPart = bodyStructure?.subParts?.[0];
       return {
         type: "pgp-mime-signed",
-        blobId: part?.blobId,
-        partId: part?.partId,
+        blobId: contentPart?.blobId || bodyStructure?.blobId,
+        partId: contentPart?.partId || bodyStructure?.partId,
+        signatureBlobId: sigPart?.blobId,
         supported: true
-        // On bascule à true car on va supporter la vérification PGP
       };
     }
   }
@@ -14103,41 +14122,53 @@ function detectPgp(contentType, bodyStructure, attachments, textBody) {
         return { type: "pgp-mime-encrypted", blobId: att.blobId, partId: att.partId, supported: true };
       }
       if (type.includes("application/pgp-signature")) {
-        return { type: "pgp-mime-signed", blobId: att.blobId, partId: att.partId, supported: true };
+        return { type: "pgp-mime-signed", blobId: att.blobId, partId: att.partId, signatureBlobId: att.blobId, supported: true };
       }
       if (name.endsWith(".pgp") || name.endsWith(".asc")) {
         return { type: "pgp-encrypted-file", blobId: att.blobId, partId: att.partId, supported: true };
       }
       if (name.endsWith(".sig")) {
-        return { type: "pgp-signature-file", blobId: att.blobId, partId: att.partId, supported: true };
+        return { type: "pgp-signature-file", blobId: att.blobId, partId: att.partId, signatureBlobId: att.blobId, supported: true };
       }
     }
   }
   return noResult;
 }
 function walkBodyStructure(part) {
+  if (!part) return null;
   const type = part.type?.toLowerCase() || "";
   if (type.includes("application/pgp-encrypted")) {
     return { type: "pgp-mime-encrypted", blobId: part.blobId, partId: part.partId, supported: true };
   }
   if (type.includes("application/pgp-signature")) {
-    return { type: "pgp-mime-signed", blobId: part.blobId, partId: part.partId, supported: true };
+    return { type: "pgp-mime-signed", blobId: part.blobId, partId: part.partId, signatureBlobId: part.blobId, supported: true };
   }
   if (type === "multipart/encrypted" || type === "multipart/signed") {
-    const hasPgp = part.subParts?.some((sp) => {
+    const subParts = part.subParts || [];
+    const hasPgp = subParts.some((sp) => {
       const sType = sp.type?.toLowerCase() || "";
       return sType.includes("application/pgp-encrypted") || sType.includes("application/pgp-signature");
     });
     if (hasPgp) {
-      const targetPart = part.subParts.find(
-        (sp) => sp.type?.toLowerCase().includes("application/pgp-encrypted") || sp.type?.toLowerCase().includes("application/pgp-signature")
-      );
-      return {
-        type: type === "multipart/encrypted" ? "pgp-mime-encrypted" : "pgp-mime-signed",
-        blobId: targetPart?.blobId,
-        partId: targetPart?.partId,
-        supported: true
-      };
+      if (type === "multipart/encrypted") {
+        const encryptedControlPart = subParts.find((sp) => sp.type?.toLowerCase().includes("application/pgp-encrypted"));
+        return {
+          type: "pgp-mime-encrypted",
+          blobId: part.blobId || encryptedControlPart?.blobId,
+          partId: encryptedControlPart?.partId,
+          supported: true
+        };
+      } else {
+        const contentPart = subParts[0];
+        const signaturePart = subParts.find((sp) => sp.type?.toLowerCase().includes("application/pgp-signature"));
+        return {
+          type: "pgp-mime-signed",
+          blobId: contentPart?.blobId || part.blobId,
+          partId: contentPart?.partId || part.partId,
+          signatureBlobId: signaturePart?.blobId || null,
+          supported: true
+        };
+      }
     }
   }
   if (part.subParts) {
@@ -14163,7 +14194,7 @@ function findPgpMimePart(bodyStructure, protocolType) {
   return null;
 }
 
-// src/mime-parse.js
+// src/mime-parse.ts
 var decoder = new TextDecoder("utf-8", { fatal: false });
 function parseMime(bytes) {
   const text = binaryString(bytes);
@@ -14205,7 +14236,7 @@ function binaryString(bytes) {
 function parseEntity(raw) {
   const sepMatch = raw.match(/\r?\n\r?\n/);
   const headerText = sepMatch ? raw.slice(0, sepMatch.index) : raw;
-  const body = sepMatch ? raw.slice(sepMatch.index + sepMatch[0].length) : "";
+  const body = sepMatch && sepMatch.index ? raw.slice(sepMatch.index + (sepMatch[0]?.length ?? 0)) : "";
   const headers = parseHeaders(headerText);
   const ctRaw = headers["content-type"] || "text/plain";
   const { type, params } = parseContentType(ctRaw);
@@ -14231,13 +14262,15 @@ function parseHeaders(headerText) {
 }
 function parseContentType(value) {
   const parts = value.split(";");
-  const type = parts[0].trim().toLowerCase();
+  const type = parts[0]?.trim().toLowerCase() || "text/plain";
   const params = {};
   for (let i3 = 1; i3 < parts.length; i3++) {
-    const eq = parts[i3].indexOf("=");
+    const part = parts[i3];
+    if (!part) continue;
+    const eq = part.indexOf("=");
     if (eq < 0) continue;
-    const k2 = parts[i3].slice(0, eq).trim().toLowerCase();
-    let v2 = parts[i3].slice(eq + 1).trim();
+    const k2 = part.slice(0, eq).trim().toLowerCase();
+    let v2 = part.slice(eq + 1).trim();
     if (v2.startsWith('"') && v2.endsWith('"')) v2 = v2.slice(1, -1);
     params[k2] = v2;
   }
@@ -14249,6 +14282,7 @@ function splitMultipart(body, boundary) {
   const segments = body.split(delim);
   for (let i3 = 1; i3 < segments.length; i3++) {
     let seg = segments[i3];
+    if (!seg) continue;
     if (seg.startsWith("--")) break;
     seg = seg.replace(/^\r?\n/, "").replace(/\r?\n$/, "");
     parts.push(seg);
@@ -14281,14 +14315,14 @@ function qpDecode(input) {
   for (let i3 = 0; i3 < cleaned.length; i3++) {
     const c3 = cleaned[i3];
     if (c3 === "=" && i3 + 2 < cleaned.length) {
-      const hex = cleaned.substr(i3 + 1, 2);
+      const hex = cleaned.substring(i3 + 1, i3 + 3);
       if (/^[0-9A-Fa-f]{2}$/.test(hex)) {
         out.push(parseInt(hex, 16));
         i3 += 2;
         continue;
       }
     }
-    out.push(cleaned.charCodeAt(i3) & 255);
+    if (c3) out.push(c3.charCodeAt(0) & 255);
   }
   return new Uint8Array(out);
 }
@@ -14339,13 +14373,13 @@ function bytesToDataUrl(bytes, type) {
 function dataUrlToText(dataUrl) {
   try {
     const base64Str = dataUrl.split(",")[1];
-    return atob(base64Str);
+    return base64Str ? atob(base64Str) : null;
   } catch {
     return null;
   }
 }
 
-// src/key-storage.js
+// src/key-storage.ts
 var DB_NAME = "pgp-plugin-store";
 var DB_VERSION = 1;
 var KEY_RECORDS_STORE = "key-records";
@@ -14428,28 +14462,122 @@ async function clearSessionKeys() {
   await txPromise(db, SESSION_KEYS_STORE, "readwrite", (s3) => s3.clear());
 }
 
-// src/index.js
-var host = require("@plugin-host");
-var React = require("react");
-var h3 = React.createElement;
-var { useState, useEffect, useCallback, useRef } = React;
+// src/pgp-import.ts
+init_openpgp_min();
+var KDF_ITERATIONS = 6e5;
+var AES_KEY_LENGTH = 256;
+async function importOpenPgpPrivateKey(armoredPrivateKeyText, storagePassphrase) {
+  if (!armoredPrivateKeyText || typeof armoredPrivateKeyText !== "string") {
+    throw new Error("Invalid OpenPGP private key: text block required");
+  }
+  let privateKey;
+  try {
+    privateKey = await Za({ armoredKey: armoredPrivateKeyText });
+    if (!privateKey.isPrivate()) {
+      throw new Error("The provided block is a public key, not a private key");
+    }
+  } catch (err) {
+    throw new Error(`OpenPGP key parsing failed: ${err.message}`);
+  }
+  const keyInfo = await extractKeyInfo(privateKey);
+  const email = (keyInfo.emailAddresses?.[0] ?? "").toLowerCase();
+  if (!email) {
+    throw new Error("OpenPGP private key must be bound to at least one valid email User ID");
+  }
+  const textBytes = new TextEncoder().encode(armoredPrivateKeyText);
+  const { encrypted, salt, iv } = await encryptPrivateKeyData(textBytes.buffer, storagePassphrase);
+  const keyRecord = {
+    id: generateUUID(),
+    email,
+    publicKey: keyInfo.armoredPublicKey || "",
+    encryptedPrivateKey: encrypted,
+    salt,
+    iv,
+    kdfIterations: KDF_ITERATIONS,
+    issuer: keyInfo.issuer || "Self-Signed (OpenPGP Web of Trust)",
+    subject: keyInfo.subject || `OpenPGP User <${email}>`,
+    serialNumber: keyInfo.serialNumber || keyInfo.fingerprint.substring(0, 16).toUpperCase(),
+    notBefore: keyInfo.notBefore,
+    notAfter: keyInfo.notAfter || null,
+    fingerprint: keyInfo.fingerprint,
+    algorithm: keyInfo.algorithm || "RSA/ECC",
+    capabilities: {
+      canSign: keyInfo.capabilities?.canSign !== false,
+      canEncrypt: keyInfo.capabilities?.canEncrypt !== false
+    }
+  };
+  return { keyRecord, keyInfo };
+}
+async function unlockPrivateKey(record, passphrase) {
+  const wrappingKey = await deriveWrappingKey(passphrase, record.salt, record.kdfIterations);
+  let rawTextBytes;
+  try {
+    rawTextBytes = await crypto.subtle.decrypt(
+      { name: "AES-GCM", iv: record.iv },
+      wrappingKey,
+      record.encryptedPrivateKey
+    );
+  } catch {
+    throw new Error("Incorrect passphrase");
+  }
+  const armoredPrivateKeyText = new TextDecoder().decode(rawTextBytes);
+  const parsedKey = await Za({ armoredKey: armoredPrivateKeyText });
+  let openPgpPrivateKey = parsedKey;
+  if (!openPgpPrivateKey.isDecrypted()) {
+    try {
+      openPgpPrivateKey = await go({
+        privateKey: openPgpPrivateKey,
+        passphrase
+      });
+    } catch (err) {
+      throw new Error(`Failed to decrypt internal OpenPGP packets: ${err.message}`);
+    }
+  }
+  return {
+    unlockedPrivateKey: openPgpPrivateKey,
+    signingKey: openPgpPrivateKey,
+    decryptionKey: openPgpPrivateKey
+  };
+}
+async function deriveWrappingKey(passphrase, salt, iterations) {
+  const enc = new TextEncoder();
+  const keyMaterial = await crypto.subtle.importKey("raw", enc.encode(passphrase), "PBKDF2", false, ["deriveKey"]);
+  return crypto.subtle.deriveKey(
+    { name: "PBKDF2", salt, iterations, hash: "SHA-256" },
+    keyMaterial,
+    { name: "AES-GCM", length: AES_KEY_LENGTH },
+    false,
+    ["encrypt", "decrypt"]
+  );
+}
+async function encryptPrivateKeyData(pkcs8Bytes, passphrase) {
+  const salt = crypto.getRandomValues(new Uint8Array(32)).buffer;
+  const iv = crypto.getRandomValues(new Uint8Array(12)).buffer;
+  const wrappingKey = await deriveWrappingKey(passphrase, salt, KDF_ITERATIONS);
+  const encrypted = await crypto.subtle.encrypt({ name: "AES-GCM", iv }, wrappingKey, pkcs8Bytes);
+  return { encrypted, salt, iv };
+}
+
+// src/index.tsx
+var h3 = import_react.default.createElement;
+var { useState, useEffect, useCallback, useRef } = import_react.default;
 var PREFS_KEY = "prefs.v1";
 var INTENT_KEY = "composeIntent.v1";
 var VERIFY_PREFIX = "verify:";
 var DEFAULT_PREFS = { defaultSign: false, defaultEncrypt: false };
 async function getPrefs() {
   try {
-    const p2 = await host.storage.get(PREFS_KEY);
+    const p2 = await import_plugin_host.default.storage.get(PREFS_KEY);
     return { ...DEFAULT_PREFS, ...p2 || {} };
   } catch {
     return { ...DEFAULT_PREFS };
   }
 }
 async function setPrefs(next) {
-  await host.storage.set(PREFS_KEY, next);
+  await import_plugin_host.default.storage.set(PREFS_KEY, next);
 }
 function settings() {
-  return host.plugin?.settings || {};
+  return import_plugin_host.default.plugin?.settings || {};
 }
 function useAes128() {
   return settings().encryptionStrength === "aes-128";
@@ -14473,10 +14601,10 @@ async function isCapable() {
           req.result.close();
         } catch {
         }
-        resolve();
+        resolve(void 0);
       };
       req.onerror = () => reject(req.error || new Error("indexedDB open failed"));
-      req.onblocked = () => resolve();
+      req.onblocked = () => resolve(void 0);
     });
     _capable = true;
   } catch {
@@ -14528,7 +14656,7 @@ async function unlockedDecryptMaps() {
   for (const r3 of recs) {
     const s3 = await getSessionKeys(r3.id);
     if (!s3) continue;
-    if (s3.decryptionKey) unlockedKeys.set(r3.id, s3.decryptionKey);
+    if (s3.unlockedPrivateKey) unlockedKeys.set(r3.id, s3.unlockedPrivateKey);
   }
   return { keyRecords: recs, unlockedKeys };
 }
@@ -14540,7 +14668,7 @@ async function resolveIntent(req) {
   let sign = pick(req.sign, req.smimeSign, req.intent && req.intent.sign, req.smime && req.smime.sign);
   let encrypt = pick(req.encrypt, req.smimeEncrypt, req.intent && req.intent.encrypt, req.smime && req.smime.encrypt);
   if (sign === void 0 && encrypt === void 0) {
-    const stored = await host.storage.get(INTENT_KEY) || {};
+    const stored = await import_plugin_host.default.storage.get(INTENT_KEY) || {};
     const prefs = await getPrefs();
     sign = typeof stored.sign === "boolean" ? stored.sign : prefs.defaultSign;
     encrypt = typeof stored.encrypt === "boolean" ? stored.encrypt : prefs.defaultEncrypt;
@@ -14553,14 +14681,14 @@ async function fetchAttachments(req) {
   for (const att of list) {
     if (!att || !att.blobId) continue;
     try {
-      const bytes = await host.jmap.fetchBlob(att.blobId, { name: att.name, type: att.type });
+      const bytes = await import_plugin_host.default.jmap.fetchBlob(att.blobId, { name: att.name, type: att.type });
       out.push({
         filename: att.name || "attachment",
         contentType: att.type || "application/octet-stream",
-        content: bytesArrayBuffer(bytes)
+        content: await bytes.arrayBuffer()
       });
     } catch (err) {
-      host.log.warn("attachment fetch failed", att.name, err);
+      import_plugin_host.default.log.warn("attachment fetch failed", att.name, err);
       throw new Error(`Could not read attachment "${att.name || ""}" for encryption`);
     }
   }
@@ -14571,7 +14699,7 @@ async function onComposeSend(req) {
   const { sign, encrypt } = await resolveIntent(req);
   if (!sign && !encrypt) return void 0;
   if (!await isCapable()) {
-    host.toast.error("Cannot sign/encrypt: OpenPGP is not running in the privileged tier.");
+    import_plugin_host.default.toast.error("Cannot sign/encrypt: OpenPGP is not running in the privileged tier.");
     return false;
   }
   try {
@@ -14583,9 +14711,12 @@ async function onComposeSend(req) {
     const cc2 = addrList(req.cc);
     const bcc = addrList(req.bcc);
     const allRecipientEmails = [...emailsOf(req.to), ...emailsOf(req.cc), ...emailsOf(req.bcc)];
-    const keyRecord = sign || encrypt ? await signingKeyRecordForEmail(from.email) : void 0;
+    let keyRecord = void 0;
+    if (sign || encrypt) {
+      keyRecord = await signingKeyRecordForEmail(from.email);
+    }
     if ((sign || encrypt) && !keyRecord) {
-      host.toast.error(`No OpenPGP key for ${from.email}. Import one in Settings → Plugins → OpenPGP.`);
+      import_plugin_host.default.toast.error(`No OpenPGP key for ${from.email}. Import one in Settings → Plugins → OpenPGP.`);
       return false;
     }
     const attachments = await fetchAttachments(req);
@@ -14601,22 +14732,23 @@ async function onComposeSend(req) {
       attachments
     });
     let finalEnvelopeBlob;
-    const session = await getSessionKeys(keyRecord.id);
+    const currentKeyRecord = keyRecord;
+    const session = await getSessionKeys(currentKeyRecord.id);
     if (encrypt) {
       const { found, missing } = await recipientKeysFor(allRecipientEmails);
       if (missing.length > 0) {
-        host.toast.error(`Missing encryption key for: ${missing.join(", ")}`);
+        import_plugin_host.default.toast.error(`Missing encryption key for: ${missing.join(", ")}`);
         return false;
       }
       let payloadToEncrypt = clearMimeBytes;
       if (sign) {
         if (!session || !session.signingKey) {
-          host.toast.error("Your OpenPGP key is locked. Unlock it in Settings, then resend.");
+          import_plugin_host.default.toast.error("Your OpenPGP key is locked. Unlock it in Settings, then resend.");
           return false;
         }
         payloadToEncrypt = await pgpSignInline(clearMimeBytes, session.signingKey);
       }
-      const encryptedBlob = await pgpEncrypt(payloadToEncrypt, found, keyRecord.publicKey, useAes128());
+      const encryptedBlob = await pgpEncrypt(payloadToEncrypt, found, currentKeyRecord.publicKey, useAes128());
       finalEnvelopeBlob = wrapAsPgpMimeEncrypted(encryptedBlob, {
         from,
         to: to2,
@@ -14628,11 +14760,12 @@ async function onComposeSend(req) {
       });
     } else if (sign) {
       if (!session || !session.signingKey) {
-        host.toast.error("Your OpenPGP key is locked. Unlock it in Settings, then resend.");
+        import_plugin_host.default.toast.error("Your OpenPGP key is locked. Unlock it in Settings, then resend.");
         return false;
       }
       const signatureBlob = await pgpSignDetached(clearMimeBytes, session.signingKey);
-      finalEnvelopeBlob = wrapAsPgpMimeSigned(clearMimeBytes, signatureBlob, {
+      const clearMimeBytesBlob = new Blob([clearMimeBytes.slice().buffer], { type: "application/octet-stream" });
+      finalEnvelopeBlob = wrapAsPgpMimeSigned(clearMimeBytesBlob, signatureBlob, {
         from,
         to: to2,
         cc: cc2,
@@ -14642,17 +14775,20 @@ async function onComposeSend(req) {
         messageId: req.messageId
       });
     }
+    if (!finalEnvelopeBlob) {
+      throw new Error("Cryptographic processing failed to generate an output envelope.");
+    }
     const rawBytes = await blobToBytes(finalEnvelopeBlob);
     const envelopeRecipients = [.../* @__PURE__ */ new Set([...allRecipientEmails])];
-    await host.jmap.sendRaw(bytesArrayBuffer(rawBytes), identityId, { envelopeRecipients });
-    host.toast.success(
+    await import_plugin_host.default.jmap.sendRaw(bytesArrayBuffer(rawBytes), identityId, { envelopeRecipients });
+    import_plugin_host.default.toast.success(
       encrypt && sign ? "Message signed, encrypted and sent (PGP/MIME)" : encrypt ? "Message encrypted and sent (PGP/MIME)" : "Message signed and sent (PGP/MIME)"
     );
-    await host.storage.set(INTENT_KEY, {});
+    await import_plugin_host.default.storage.set(INTENT_KEY, {});
     return false;
   } catch (err) {
-    host.log.error("onComposeSend failed", err);
-    host.toast.error(`OpenPGP send failed: ${err && err.message ? err.message : String(err)}`);
+    import_plugin_host.default.log.error("onComposeSend failed", err);
+    import_plugin_host.default.toast.error(`OpenPGP send failed: ${err && err.message ? err.message : String(err)}`);
     return false;
   }
 }
@@ -14676,7 +14812,7 @@ async function maybeAutoImportSigner(status) {
       });
     }
   } catch (err) {
-    host.log.warn("auto-import signer key failed", err);
+    import_plugin_host.default.log.warn("auto-import signer key failed", err);
   }
 }
 function statusNoticeHtml(message, tone) {
@@ -14686,18 +14822,18 @@ function statusNoticeHtml(message, tone) {
 async function persistVerifyStatus(emailId, status) {
   if (!emailId) return;
   try {
-    await host.storage.set(VERIFY_PREFIX + emailId, status);
+    await import_plugin_host.default.storage.set(VERIFY_PREFIX + emailId, status);
   } catch {
   }
 }
 async function onRenderEmailBody(body, ctx) {
   if (!ctx) return void 0;
   if (!await isCapable()) return void 0;
-  const detection = detectPgp(ctx.contentType, ctx.bodyStructure, ctx.attachments);
+  const detection = detectPgp(ctx.contentType, ctx.bodyStructure, ctx.attachments, ctx.textBody);
   if (!detection.type) return void 0;
   if (!detection.supported) {
     const status = {
-      isSigned: detection.type === "detached-sig",
+      isSigned: detection.type === "pgp-signature-file" || detection.type === "pgp-mime-signed",
       isEncrypted: false,
       unsupportedReason: `Unsupported OpenPGP layout (${detection.type})`
     };
@@ -14708,13 +14844,13 @@ async function onRenderEmailBody(body, ctx) {
   if (!blobId) return void 0;
   const fromEmail = (addrList(ctx.from)[0] || {}).email;
   try {
-    const raw = await host.jmap.fetchBlob(blobId);
-    const pgpMessageContent = normalizePgpMessage(bytesArrayBuffer(raw instanceof Uint8Array ? raw : new Uint8Array(raw)));
-    if (detection.type === "enveloped-data") {
+    const raw = await import_plugin_host.default.jmap.fetchBlob(blobId);
+    const pgpMessageContent = normalizePgpMessage(new Uint8Array(await raw.arrayBuffer()));
+    if (detection.type === "pgp-mime-encrypted" || detection.type === "pgp-inline-encrypted" || detection.type === "pgp-encrypted-file") {
       const { keyRecords, unlockedKeys } = await unlockedDecryptMaps();
       let result;
       try {
-        result = await pgpDecrypt({ cmsBytes: pgpMessageContent, keyRecords, unlockedKeys });
+        result = await pgpDecrypt({ cmsBytes: new TextEncoder().encode(pgpMessageContent), keyRecords, unlockedKeys });
       } catch (err) {
         if (err instanceof PgpKeyLockedError) {
           const status2 = { isEncrypted: true, decryptionSuccess: false, decryptionError: "locked" };
@@ -14728,7 +14864,7 @@ async function onRenderEmailBody(body, ctx) {
             verification: status2
           };
         }
-        const status = { isEncrypted: true, decryptionSuccess: false, decryptionError: err && err.message ? err.message : String(err) };
+        const status = { isEncrypted: true, decryptionSuccess: false, decryptionError: String(err) };
         await persistVerifyStatus(ctx.id, status);
         return {
           ...body,
@@ -14761,10 +14897,10 @@ async function onRenderEmailBody(body, ctx) {
         verification
       };
     }
-    if (detection.type === "signed-data") {
-      const signatureBlock = detection.signatureBlobId ? await host.jmap.fetchBlob(detection.signatureBlobId) : null;
+    if (detection.type === "pgp-mime-signed" || detection.type === "pgp-inline-signed" || detection.type === "pgp-signature-file") {
+      const signatureBlock = detection.signatureBlobId ? await import_plugin_host.default.jmap.fetchBlob(detection.signatureBlobId) : null;
       const signatureString = signatureBlock ? new TextDecoder().decode(await blobToBytes(signatureBlock)) : null;
-      const v2 = await pgpVerify(pgpMessageContent, fromEmail, signatureString);
+      const v2 = await pgpVerify(new TextEncoder().encode(pgpMessageContent), fromEmail, signatureString);
       await maybeAutoImportSigner(v2.status);
       const parsed = parseMime(v2.mimeBytes);
       await persistVerifyStatus(ctx.id, v2.status);
@@ -14778,7 +14914,7 @@ async function onRenderEmailBody(body, ctx) {
       };
     }
   } catch (err) {
-    host.log.error("onRenderEmailBody failed", err);
+    import_plugin_host.default.log.error("onRenderEmailBody failed", err);
     return void 0;
   }
   return void 0;
@@ -14808,6 +14944,7 @@ function fmtDate(iso) {
   }
 }
 function isExpired(iso) {
+  if (!iso) return false;
   try {
     return iso ? new Date(iso).getTime() < Date.now() : false;
   } catch {
@@ -14825,12 +14962,12 @@ function ComposerToolbar() {
           if (alive) setReady(false);
           return;
         }
-        const stored = await host.storage.get(INTENT_KEY) || {};
+        const stored = await import_plugin_host.default.storage.get(INTENT_KEY) || {};
         const prefs = await getPrefs();
         if (alive) {
           setIntent({
-            sign: typeof stored.sign === "boolean" ? stored.sign : prefs.defaultSign,
-            encrypt: typeof stored.encrypt === "boolean" ? stored.encrypt : prefs.defaultEncrypt
+            sign: typeof stored.sign === "boolean" ? stored.sign : !!prefs.defaultSign,
+            encrypt: typeof stored.encrypt === "boolean" ? stored.encrypt : !!prefs.defaultEncrypt
           });
         }
         const recs = await listKeyRecords();
@@ -14845,7 +14982,7 @@ function ComposerToolbar() {
   }, []);
   const update = useCallback(async (next) => {
     setIntent(next);
-    await host.storage.set(INTENT_KEY, next);
+    await import_plugin_host.default.storage.set(INTENT_KEY, next);
   }, []);
   const toggle = (key) => update({ ...intent, [key]: !intent[key] });
   const pill = (active) => ({
@@ -14869,12 +15006,14 @@ function ComposerToolbar() {
       style: pill(intent.sign),
       title: "Digitally sign this message",
       onClick: () => toggle("sign")
+      // Validé par TypeScript
     }, intent.sign ? "✓ Sign" : "Sign"),
     h3("button", {
       type: "button",
       style: pill(intent.encrypt),
       title: "Encrypt this message to its recipients",
       onClick: () => toggle("encrypt")
+      // Validé par TypeScript
     }, intent.encrypt ? "✓ Encrypt" : "Encrypt")
   );
 }
@@ -14889,12 +15028,15 @@ function EmailBanner(props) {
         setLoaded(true);
         return;
       }
-      let s3 = await host.storage.get(VERIFY_PREFIX + email.id);
+      let s3 = await import_plugin_host.default.storage.get(VERIFY_PREFIX + email.id);
       if (!s3) {
         const ct2 = email.headers && (email.headers["Content-Type"] || email.headers["content-type"]);
         const ctStr = Array.isArray(ct2) ? ct2[0] : ct2;
-        if (ctStr && ctStr.includes("multipart/encrypted")) s3 = { isEncrypted: true };
-        else if (ctStr && ctStr.includes("multipart/signed")) s3 = { isSigned: true };
+        if (ctStr && ctStr.includes("multipart/encrypted")) {
+          s3 = { isEncrypted: true };
+        } else if (ctStr && ctStr.includes("multipart/signed")) {
+          s3 = { isSigned: true };
+        }
       }
       if (alive) {
         setStatus(s3 || null);
@@ -14969,7 +15111,9 @@ function SettingsSection() {
     setCerts(c3);
     setPrefsState(p2);
     const u2 = {};
-    for (const rec of k2) u2[rec.id] = !!await getSessionKeys(rec.id);
+    for (const rec of k2) {
+      u2[rec.id] = !!await getSessionKeys(rec.id);
+    }
     setUnlocked(u2);
   }, []);
   useEffect(() => {
@@ -14991,14 +15135,14 @@ function SettingsSection() {
     setBusy(true);
     try {
       const text = new TextDecoder().decode(await file.arrayBuffer());
-      const { importOpenPgpPrivateKey } = await import("./pgp-import.js");
       const { keyRecord } = await importOpenPgpPrivateKey(text, storagePass);
       await saveKeyRecord(keyRecord);
-      host.toast.success(`Imported OpenPGP key for ${keyRecord.email || "identity"}`);
+      import_plugin_host.default.toast.success(`Imported OpenPGP key for ${keyRecord.email || "identity"}`);
       if (fileRef.current) fileRef.current.value = "";
       await refresh();
     } catch (err) {
-      host.toast.error(`Import failed: ${err && err.message ? err.message : String(err)}`);
+      const error = err;
+      import_plugin_host.default.toast.error(`Import failed: ${error?.message ? error.message : String(err)}`);
     } finally {
       setBusy(false);
     }
@@ -15008,24 +15152,29 @@ function SettingsSection() {
     if (!pass) return;
     setBusy(true);
     try {
-      const { unlockPrivateKey } = await import("./pgp-import.js");
-      const { signingKey, decryptionKey } = await unlockPrivateKey(rec, pass);
-      await saveSessionKeys({ id: rec.id, signingKey, decryptionKey });
-      host.toast.success(`Unlocked ${rec.email || "key"}`);
+      const { unlockedPrivateKey, signingKey, decryptionKey } = await unlockPrivateKey(rec, pass);
+      await saveSessionKeys({
+        id: rec.id,
+        unlockedPrivateKey,
+        signingKey,
+        decryptionKey
+      });
+      import_plugin_host.default.toast.success(`Unlocked ${rec.email || "key"}`);
       await refresh();
     } catch (err) {
-      host.toast.error(err && err.message ? err.message : "Unlock failed");
+      const error = err;
+      import_plugin_host.default.toast.error(error?.message ? error.message : "Unlock failed");
     } finally {
       setBusy(false);
     }
   }
   async function lock(rec) {
     await deleteSessionKeys(rec.id);
-    host.toast.info(`Locked ${rec.email || "key"}`);
+    import_plugin_host.default.toast.info(`Locked ${rec.email || "key"}`);
     await refresh();
   }
   async function removeKey(rec) {
-    const ok = await host.ui.confirm({
+    const ok = await import_plugin_host.default.ui.confirm({
       title: "Delete OpenPGP key",
       message: `Delete the private key and public identity for ${rec.email || "this identity"}? You will no longer be able to decrypt mail encrypted to it.`,
       danger: true,
@@ -15034,7 +15183,7 @@ function SettingsSection() {
     if (!ok) return;
     await deleteSessionKeys(rec.id);
     await deleteKeyRecord(rec.id);
-    host.toast.success("Key deleted");
+    import_plugin_host.default.toast.success("Key deleted");
     await refresh();
   }
   async function importCertFile() {
@@ -15052,7 +15201,6 @@ function SettingsSection() {
         id: generateUUID(),
         email,
         publicKey: text,
-        // On stocke le bloc Armored textuel sous le champ publicKey
         issuer: info.issuer,
         subject: info.subject,
         notBefore: info.notBefore,
@@ -15060,11 +15208,12 @@ function SettingsSection() {
         fingerprint: info.fingerprint,
         source: "manual"
       });
-      host.toast.success(`Imported public key for ${email}`);
+      import_plugin_host.default.toast.success(`Imported public key for ${email}`);
       if (certFileRef.current) certFileRef.current.value = "";
       await refresh();
     } catch (err) {
-      host.toast.error(`Key import failed: ${err && err.message ? err.message : String(err)}`);
+      const error = err;
+      import_plugin_host.default.toast.error(`Key import failed: ${error?.message ? error.message : String(err)}`);
     } finally {
       setBusy(false);
     }
@@ -15202,7 +15351,7 @@ var hooks = {
     try {
       await clearSessionKeys();
     } catch (err) {
-      host.log.warn("clearSessionKeys failed", err);
+      import_plugin_host.default.log.warn("clearSessionKeys failed", err);
     }
   },
   async onAccountSwitch() {
@@ -15210,7 +15359,7 @@ var hooks = {
     try {
       await clearSessionKeys();
     } catch (err) {
-      host.log.warn("clearSessionKeys failed", err);
+      import_plugin_host.default.log.warn("clearSessionKeys failed", err);
     }
   }
 };
