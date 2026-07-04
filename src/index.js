@@ -191,7 +191,7 @@ async function fetchAttachments(req) {
   return out;
 }
 
-export async function onComposeSend(req) {
+export async function onComposeSend(req) {//TODO EDIT TO SEND TO SELF ENCRYPTED IF NOT SEND ENCRYPTED TO OTHERS
   if (!req || typeof req !== 'object') return undefined;
 
   const { sign, encrypt } = await resolveIntent(req);

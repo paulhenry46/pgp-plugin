@@ -7,7 +7,7 @@ import * as openpgp from 'openpgp';
 
 /**
  * Signe un contenu MIME ou textuel en utilisant une clé privée OpenPGP déverrouillée.
- * Génère une signature combinée enveloppée (Cleartext Signature ou Armored OpenPGP Message).
+ * Génère une signature combinée enveloppée (Armored OpenPGP Message binaire).
  * * @param {Uint8Array} mimeBytes - Les octets du message à signer (MIME ou texte brut).
  * @param {openpgp.PrivateKey} unlockedPrivateKey - L'objet clé privée OpenPGP déjà déverrouillé.
  * @returns {Promise<Blob>} Un blob contenant le message signé au format ASCII Armored.
@@ -17,22 +17,39 @@ export async function pgpSign(mimeBytes, unlockedPrivateKey) {
     throw new Error('Une clé privée OpenPGP valide et déverrouillée est requise pour signer.');
   }
 
-  // Conversion du Uint8Array en chaîne ou en flux compatible OpenPGP
-  // Note: OpenPGP prend en charge les Uint8Array directement pour créer des messages binaires/littéraux
-  const message = await openpgp.createMessage({
-    binary: mimeBytes
-  });
+  const message = await openpgp.createMessage({ binary: mimeBytes });
 
-  // Génération du message signé
-  // Par défaut, openpgp.sign produit un bloc ASCII Armored (texte) contenant le payload + la signature détachable imbriquée
   const armoredSignedMessage = await openpgp.sign({
     message,
     signingKeys: unlockedPrivateKey,
-    detached: false // false génère un message signé enveloppé (semblable à l'opaque signé de S/MIME)
+    detached: false // false génère un message signé enveloppé
   });
 
-  // Retourne un Blob texte au format standard OpenPGP
   return new Blob([armoredSignedMessage], { type: 'application/pgp-signature; charset=utf-8' });
+}
+
+/**
+ * Produit une signature PGP enveloppée (Inline) sous forme de Uint8Array.
+ * Indispensable pour la phase "Sign-then-Encrypt" dans l'index avant chiffrement.
+ * * @param {Uint8Array} mimeBytes 
+ * @param {openpgp.PrivateKey} unlockedPrivateKey 
+ * @returns {Promise<Uint8Array>} Les octets du bloc signé enveloppé textuel/binaire.
+ */
+export async function pgpSignInline(mimeBytes, unlockedPrivateKey) {
+  if (!unlockedPrivateKey || typeof unlockedPrivateKey.sign !== 'function') {
+    throw new Error('Une clé privée OpenPGP valide et déverrouillée est requise pour signer.');
+  }
+
+  const message = await openpgp.createMessage({ binary: mimeBytes });
+
+  const armoredSignedMessage = await openpgp.sign({
+    message,
+    signingKeys: unlockedPrivateKey,
+    detached: false
+  });
+
+  // On retourne un Uint8Array car l'index passe directement ce résultat au chiffreur
+  return new TextEncoder().encode(armoredSignedMessage);
 }
 
 /**
