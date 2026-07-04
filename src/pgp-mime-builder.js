@@ -4,7 +4,7 @@
  * and packages them according to RFC 3156 (PGP/MIME).
  */
 
-import { createMimeMessage } from 'mimetext';
+import { createMimeMessage } from 'mimetext/browser';
 import { generateUUID } from './util.js';
 
 const CRLF = '\r\n';
