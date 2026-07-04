@@ -4,11 +4,18 @@
  * Checks Content-Type, JMAP bodyStructure, attachment metadata, and inline text.
  */
 
-export function detectPgp(contentType, bodyStructure, attachments, textBody) {
-  const noResult = { type: null, supported: false };
+export interface PgpDetectionResult {
+  type: 'pgp-inline-encrypted' | 'pgp-inline-signed' | 'pgp-mime-encrypted' | 'pgp-mime-signed' | 'pgp-encrypted-file' | 'pgp-signature-file' | null;
+  supported: boolean;
+  blobId?: string | null;
+  partId?: string | null;
+  signatureBlobId?: string | null;
+}
 
-  // 1. Détection du mode PGP INLINE (Le plus fréquent dans le corps du texte)
-  // On vérifie d'abord si le texte brut contient des marqueurs PGP alternatifs
+export function detectPgp(contentType: string, bodyStructure: any, attachments: any[], textBody: string): PgpDetectionResult {
+  const noResult: PgpDetectionResult = { type: null, supported: false };
+
+  // 1. Détection du mode PGP INLINE (Corps textuel brut)
   if (textBody && typeof textBody === 'string') {
     if (textBody.includes('-----BEGIN PGP MESSAGE-----')) {
       return { type: 'pgp-inline-encrypted', supported: true };
@@ -26,19 +33,22 @@ export function detectPgp(contentType, bodyStructure, attachments, textBody) {
       const part = findPgpMimePart(bodyStructure, 'application/pgp-encrypted');
       return { 
         type: 'pgp-mime-encrypted', 
-        blobId: part?.blobId, 
+        blobId: bodyStructure?.blobId || part?.blobId, // On préfère le blob global pour le déchiffrement complet
         partId: part?.partId, 
         supported: true 
       };
     }
 
     if (ct.includes('multipart/signed') && ct.includes('protocol="application/pgp-signature"')) {
-      const part = findPgpMimePart(bodyStructure, 'application/pgp-signature');
+      const sigPart = findPgpMimePart(bodyStructure, 'application/pgp-signature');
+      // En PGP/MIME signé, le blobId principal (le contenu à vérifier) est souvent le premier enfant du multipart
+      const contentPart = bodyStructure?.subParts?.[0]; 
       return { 
         type: 'pgp-mime-signed', 
-        blobId: part?.blobId, 
-        partId: part?.partId, 
-        supported: true // On bascule à true car on va supporter la vérification PGP
+        blobId: contentPart?.blobId || bodyStructure?.blobId, 
+        partId: contentPart?.partId || bodyStructure?.partId, 
+        signatureBlobId: sigPart?.blobId, 
+        supported: true 
       };
     }
   }
@@ -59,16 +69,15 @@ export function detectPgp(contentType, bodyStructure, attachments, textBody) {
         return { type: 'pgp-mime-encrypted', blobId: att.blobId, partId: att.partId, supported: true };
       }
       if (type.includes('application/pgp-signature')) {
-        return { type: 'pgp-mime-signed', blobId: att.blobId, partId: att.partId, supported: true };
+        return { type: 'pgp-mime-signed', blobId: att.blobId, partId: att.partId, signatureBlobId: att.blobId, supported: true };
       }
       
       // Fallback par extension de fichier
       if (name.endsWith('.pgp') || name.endsWith('.asc')) {
-        // Souvent les pièces jointes chiffrées finissent par .pgp/.asc
         return { type: 'pgp-encrypted-file', blobId: att.blobId, partId: att.partId, supported: true };
       }
       if (name.endsWith('.sig')) {
-        return { type: 'pgp-signature-file', blobId: att.blobId, partId: att.partId, supported: true };
+        return { type: 'pgp-signature-file', blobId: att.blobId, partId: att.partId, signatureBlobId: att.blobId, supported: true };
       }
     }
   }
@@ -78,36 +87,54 @@ export function detectPgp(contentType, bodyStructure, attachments, textBody) {
 
 /**
  * Parcourt récursivement l'arborescence des parties de l'e-mail
+ * Aligné pour retourner un PgpDetectionResult valide
  */
-function walkBodyStructure(part) {
+function walkBodyStructure(part: any): PgpDetectionResult | null {
+  if (!part) return null;
   const type = part.type?.toLowerCase() || '';
 
+  // Cas direct : La partie elle-même est du contenu PGP
   if (type.includes('application/pgp-encrypted')) {
     return { type: 'pgp-mime-encrypted', blobId: part.blobId, partId: part.partId, supported: true };
   }
   if (type.includes('application/pgp-signature')) {
-    return { type: 'pgp-mime-signed', blobId: part.blobId, partId: part.partId, supported: true };
+    return { type: 'pgp-mime-signed', blobId: part.blobId, partId: part.partId, signatureBlobId: part.blobId, supported: true };
   }
 
+  // Cas conteneur : Gestion des structures multiparts imbriquées
   if (type === 'multipart/encrypted' || type === 'multipart/signed') {
-    const hasPgp = part.subParts?.some((sp) => {
+    const subParts = part.subParts || [];
+    
+    const hasPgp = subParts.some((sp: any) => {
       const sType = sp.type?.toLowerCase() || '';
       return sType.includes('application/pgp-encrypted') || sType.includes('application/pgp-signature');
     });
+
     if (hasPgp) {
-      const targetPart = part.subParts.find((sp) => 
-        sp.type?.toLowerCase().includes('application/pgp-encrypted') || 
-        sp.type?.toLowerCase().includes('application/pgp-signature')
-      );
-      return { 
-        type: type === 'multipart/encrypted' ? 'pgp-mime-encrypted' : 'pgp-mime-signed', 
-        blobId: targetPart?.blobId, 
-        partId: targetPart?.partId, 
-        supported: true 
-      };
+      if (type === 'multipart/encrypted') {
+        const encryptedControlPart = subParts.find((sp: any) => sp.type?.toLowerCase().includes('application/pgp-encrypted'));
+        return { 
+          type: 'pgp-mime-encrypted', 
+          blobId: part.blobId || encryptedControlPart?.blobId, 
+          partId: encryptedControlPart?.partId, 
+          supported: true 
+        };
+      } else {
+        // multipart/signed : Séparation obligatoire du contenu et de sa signature détachée
+        const contentPart = subParts[0]; // Généralement l'enveloppe de texte/html à signer
+        const signaturePart = subParts.find((sp: any) => sp.type?.toLowerCase().includes('application/pgp-signature'));
+        return {
+          type: 'pgp-mime-signed',
+          blobId: contentPart?.blobId || part.blobId,
+          partId: contentPart?.partId || part.partId,
+          signatureBlobId: signaturePart?.blobId || null,
+          supported: true
+        };
+      }
     }
   }
 
+  // Descente récursive dans l'arbre JMAP
   if (part.subParts) {
     for (const sub of part.subParts) {
       const result = walkBodyStructure(sub);
@@ -121,7 +148,7 @@ function walkBodyStructure(part) {
 /**
  * Trouve la sous-partie spécifique correspondant au protocole PGP demandé
  */
-function findPgpMimePart(bodyStructure, protocolType) {
+function findPgpMimePart(bodyStructure: any, protocolType: string): any | null {
   if (!bodyStructure) return null;
   const type = bodyStructure.type?.toLowerCase() || '';
   if (type.includes(protocolType)) {

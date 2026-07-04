@@ -1,0 +1,15 @@
+{
+  "compilerOptions": {
+    "target": "ES2022",
+    "module": "NodeNext",
+    "moduleResolution": "NodeNext",
+    "allowImportingTsExtensions": true,
+    "rewriteRelativeImportExtensions": true,
+    "jsx": "react",                 // Permet de gérer le JSX ou le React.createElement
+    "strict": true,                 // Active la vérification stricte des types
+    "esModuleInterop": true,        // Assure la compatibilité entre CommonJS et ES Modules
+    "skipLibCheck": true,           // Accélère la vérification en ignorant les types des node_modules
+    "isolatedModules": true         // Requis par esbuild pour la compilation fichier par fichier
+  },
+  "include": ["src/**/*", "src/*"],
+}

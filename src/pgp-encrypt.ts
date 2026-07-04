@@ -15,8 +15,14 @@ import * as openpgp from 'openpgp';
  * @param {boolean} useAes128 - Si true, force AES-128, sinon utilise le standard AES-256.
  * @returns {Promise<Blob>} Un blob contenant le message chiffré au format ASCII Armored.
  */
-export async function pgpEncrypt(mimeBytes, recipientPublicKeysArmored, senderPublicKeyArmored, useAes128) {
-  // 1. Fusion et dédoublonnement des clés publiques (destinataires + expéditeur)
+export async function pgpEncrypt(
+  mimeBytes: Uint8Array, 
+  recipientPublicKeysArmored: string[], 
+  senderPublicKeyArmored: string, 
+  useAes128: boolean
+): Promise<Blob> {
+  
+  // 1. Fusion et dédoublonnement des clés publiques
   const allKeyStrings = deduplicateKeys([...recipientPublicKeysArmored, senderPublicKeyArmored]);
   
   if (allKeyStrings.length === 0) {
@@ -24,12 +30,14 @@ export async function pgpEncrypt(mimeBytes, recipientPublicKeysArmored, senderPu
   }
 
   // 2. Parsing des clés pour l'API OpenPGP
-  const encryptionKeys = [];
+  // Correction TypeScript : Déclaration d'un tableau typé pour l'API encrypt
+  const encryptionKeys: openpgp.PublicKey[] = [];
+  
   for (const keyArmored of allKeyStrings) {
     try {
       const parsedKey = await openpgp.readKey({ armoredKey: keyArmored });
       encryptionKeys.push(parsedKey);
-    } catch (e) {
+    } catch (e: any) {
       console.warn(`Impossible de lire une clé publique, elle sera ignorée: ${e.message}`);
     }
   }
@@ -42,26 +50,29 @@ export async function pgpEncrypt(mimeBytes, recipientPublicKeysArmored, senderPu
   const message = await openpgp.createMessage({ binary: mimeBytes });
 
   // 4. Configuration de l'algorithme symétrique (Session Key)
-  // OpenPGP utilise par défaut AES-256 (recommandé)
   const algorithm = useAes128 ? openpgp.enums.symmetric.aes128 : openpgp.enums.symmetric.aes256;
 
   // 5. Chiffrement de bout en bout
+  // Correction Erreur : Changement de preferredSymmetricAlgorithms en preferredSymmetricAlgorithm
   const encryptedArmored = await openpgp.encrypt({
     message,
     encryptionKeys,
-    config: { preferredSymmetricAlgorithms: [algorithm] }
+    config: { 
+      preferredSymmetricAlgorithm: algorithm 
+    }
   });
 
   // 6. Retourne un Blob texte au format standard OpenPGP chiffré
-  return new Blob([encryptedArmored], { type: 'application/pgp-encrypted; charset=utf-8' });
+  // OpenPGP.js renvoie par défaut une String au format armored si l'option format n'est pas modifiée.
+  return new Blob([encryptedArmored as string], { type: 'application/pgp-encrypted; charset=utf-8' });
 }
 
 /**
  * Dédoublonne les chaînes de clés blindées pour éviter de chiffrer deux fois pour la même clé
  */
-function deduplicateKeys(keys) {
+function deduplicateKeys(keys: string[]): string[] {
   const seen = new Set();
-  const result = [];
+  const result: string[] = [];
   for (const key of keys) {
     if (!key) continue;
     const trimmed = key.trim();

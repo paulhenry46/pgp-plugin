@@ -10,27 +10,28 @@
  * • email-banner slot             → signature / encryption status
  * • settings-section slot         → key import, unlock/lock, recipient public keys
  */
-
-const host = require('@plugin-host');
-const React = require('react');
+import host from '@plugin-host';
+import React from 'react'
 const h = React.createElement;
 const { useState, useEffect, useCallback, useRef } = React;
 
 // Importations des nouveaux modules OpenPGP & Mimetext
-import { buildMimeMessage, wrapAsPgpMimeEncrypted, wrapAsPgpMimeSigned } from './pgp-mime-builder.js';
-import { pgpSignDetached, pgpSignInline } from './pgp-sign.js';
-import { pgpEncrypt } from './pgp-encrypt.js';
-import { pgpVerify } from './pgp-verify.js';
-import { pgpDecrypt, normalizePgpMessage, PgpKeyLockedError } from './pgp-decrypt.js';
-import { detectPgp } from './pgp-detect.js'; // Remplacement de detectSmime
-import { parseMime } from './mime-parse.js';
-import { extractKeyInfo } from './pgp-key-utils.js';
-import { generateUUID } from './util.js';
+import { buildMimeMessage, wrapAsPgpMimeEncrypted, wrapAsPgpMimeSigned } from './pgp-mime-builder.ts';
+import { pgpSignDetached, pgpSignInline } from './pgp-sign.ts';
+import { pgpEncrypt } from './pgp-encrypt.ts';
+import { pgpVerify } from './pgp-verify.ts';
+import { pgpDecrypt, normalizePgpMessage, PgpKeyLockedError } from './pgp-decrypt.ts';
+import { detectPgp } from './pgp-detect.ts'; // Remplacement de detectSmime
+import { parseMime } from './mime-parse.ts';
+import { extractKeyInfo } from './pgp-key-utils.ts';
+import { generateUUID } from './util.ts';
 import {
   saveKeyRecord, listKeyRecords, deleteKeyRecord,
   savePublicCert, listPublicCerts, deletePublicCert,
-  saveSessionKeys, getSessionKeys, deleteSessionKeys, clearSessionKeys,
-} from './key-storage.js';
+  saveSessionKeys, getSessionKeys, deleteSessionKeys, clearSessionKeys, KeyRecord, PublicCert
+} from './key-storage.ts';
+
+ import { importOpenPgpPrivateKey, unlockPrivateKey } from './pgp-import.ts';
 
 // ─── Shared preferences (api.storage; shared across iframes) ──────────
 
@@ -48,7 +49,7 @@ async function getPrefs() {
     return { ...DEFAULT_PREFS };
   }
 }
-async function setPrefs(next) {
+async function setPrefs(next: any) {
   await host.storage.set(PREFS_KEY, next);
 }
 
@@ -67,7 +68,7 @@ const NOT_PRIVILEGED_MSG =
   '"tier": "privileged" so it loads in the same-origin tier. Contact your ' +
   'administrator.';
 
-let _capable = null;
+let _capable: boolean | null = null;
 async function isCapable() {
   if (_capable !== null) return _capable;
   try {
@@ -76,9 +77,9 @@ async function isCapable() {
       let req;
       try { req = indexedDB.open('pgp-capability-probe'); }
       catch (e) { reject(e); return; }
-      req.onsuccess = () => { try { req.result.close(); } catch { /* ignore */ } resolve(); };
+      req.onsuccess = () => { try { req.result.close(); } catch { /* ignore */ } resolve(void 0); };
       req.onerror = () => reject(req.error || new Error('indexedDB open failed'));
-      req.onblocked = () => resolve();
+      req.onblocked = () => resolve(void 0);
     });
     _capable = true;
   } catch {
@@ -89,7 +90,7 @@ async function isCapable() {
 
 // ─── Address helpers ──────────────────────────────────────────────────
 
-function parseAddr(value) {
+function parseAddr(value: any) {
   if (value && typeof value === 'object' && value.email) {
     return { name: value.name || undefined, email: String(value.email) };
   }
@@ -98,26 +99,26 @@ function parseAddr(value) {
   if (m) return { name: (m[1] || '').trim() || undefined, email: m[2] };
   return { email: s.trim() };
 }
-function addrList(arr) {
+function addrList(arr: any) {
   if (!arr) return [];
   return (Array.isArray(arr) ? arr : [arr]).map(parseAddr).filter((a) => a.email);
 }
-function emailsOf(arr) {
+function emailsOf(arr: any) {
   return addrList(arr).map((a) => a.email.toLowerCase());
 }
 
 // ─── Blob/bytes helpers ────────────────────────────────────────────────
 
-async function blobToBytes(blob) {
+async function blobToBytes(blob: Blob): Promise<Uint8Array> {
   return new Uint8Array(await blob.arrayBuffer());
 }
-function bytesArrayBuffer(u8) {
-  return u8.buffer.slice(u8.byteOffset, u8.byteOffset + u8.byteLength);
+function bytesArrayBuffer(u8: Uint8Array) {
+  return u8.buffer.slice(u8.byteOffset, u8.byteOffset + u8.byteLength) as ArrayBuffer;
 }
 
 // ─── Key resolution ────────────────────────────────────────────────────
 
-async function signingKeyRecordForEmail(fromEmail) {
+async function signingKeyRecordForEmail(fromEmail: string | undefined): Promise<KeyRecord | undefined> {
   const recs = await listKeyRecords();
   const lower = (fromEmail || '').toLowerCase();
   return (
@@ -127,7 +128,7 @@ async function signingKeyRecordForEmail(fromEmail) {
   );
 }
 
-async function recipientKeysFor(emails) {
+async function recipientKeysFor(emails:any) {
   const certs = await listPublicCerts();
   const found = [];
   const missing = [];
@@ -147,15 +148,15 @@ async function unlockedDecryptMaps() {
     const s = await getSessionKeys(r.id);
     if (!s) continue;
     // OpenPGP unifie la clé de déchiffrement (plus besoin de clé legacy)
-    if (s.decryptionKey) unlockedKeys.set(r.id, s.decryptionKey);
+    if (s.unlockedPrivateKey) unlockedKeys.set(r.id, s.unlockedPrivateKey);
   }
   return { keyRecords: recs, unlockedKeys };
 }
 
 // ─── Compose-send takeover ─────────────────────────────────────────────
 
-async function resolveIntent(req) {
-  const pick = (...vals) => {
+async function resolveIntent(req:any) {
+  const pick = (...vals:any[]) => {
     for (const v of vals) if (typeof v === 'boolean') return v;
     return undefined;
   };
@@ -171,7 +172,7 @@ async function resolveIntent(req) {
   return { sign: !!sign, encrypt: !!encrypt };
 }
 
-async function fetchAttachments(req) {
+async function fetchAttachments(req: ComposeRequest) {
   const list = req.attachments || [];
   const out = [];
   for (const att of list) {
@@ -181,7 +182,7 @@ async function fetchAttachments(req) {
       out.push({
         filename: att.name || 'attachment',
         contentType: att.type || 'application/octet-stream',
-        content: bytesArrayBuffer(bytes),
+        content: await bytes.arrayBuffer(),
       });
     } catch (err) {
       host.log.warn('attachment fetch failed', att.name, err);
@@ -191,7 +192,36 @@ async function fetchAttachments(req) {
   return out;
 }
 
-export async function onComposeSend(req) {//TODO EDIT TO SEND TO SELF ENCRYPTED IF NOT SEND ENCRYPTED TO OTHERS
+export interface ComposeAttachment {
+  name: string;
+  type: string;
+  size: number;
+  blobId: string;
+  cid?: string;
+}
+
+export interface ComposeRequest {
+  to: string[];
+  cc: string[];
+  bcc: string[];
+  subject: string;
+  htmlBody: string;
+  textBody: string;
+  identityId: string;
+  identity?: string; 
+  fromEmail: any;
+  fromName: any;
+  from?: any;     
+  inReplyTo?: string;
+  references?: string[];
+  delayedUntil?: string | null;
+  attachments: ComposeAttachment[];
+  messageId?: string; // Utilisé par les wrappers PGP/MIME
+  text?: string;      // Fallback
+  html?: string;      // Fallback
+}
+
+export async function onComposeSend(req: ComposeRequest): Promise<boolean | undefined> {
   if (!req || typeof req !== 'object') return undefined;
 
   const { sign, encrypt } = await resolveIntent(req);
@@ -204,7 +234,8 @@ export async function onComposeSend(req) {//TODO EDIT TO SEND TO SELF ENCRYPTED 
 
   try {
     const identityId = req.identityId || req.identity || '';
-    if (!identityId) throw new Error('No sending identity available');
+
+  if (!identityId) throw new Error('No sending identity available');
 
     const from = parseAddr(req.fromEmail || req.from || (addrList(req.from)[0] || {}).email || '');
     if (!from.email) throw new Error('Could not determine sender address');
@@ -214,7 +245,12 @@ export async function onComposeSend(req) {//TODO EDIT TO SEND TO SELF ENCRYPTED 
     const bcc = addrList(req.bcc);
     const allRecipientEmails = [...emailsOf(req.to), ...emailsOf(req.cc), ...emailsOf(req.bcc)];
 
-    const keyRecord = (sign || encrypt) ? await signingKeyRecordForEmail(from.email) : undefined;
+    // Initialisation typée
+    let keyRecord: KeyRecord | undefined = undefined;
+    if (sign || encrypt) {
+      keyRecord = await signingKeyRecordForEmail(from.email);
+    }
+
     if ((sign || encrypt) && !keyRecord) {
       host.toast.error(`No OpenPGP key for ${from.email}. Import one in Settings → Plugins → OpenPGP.`);
       return false;
@@ -234,8 +270,12 @@ export async function onComposeSend(req) {//TODO EDIT TO SEND TO SELF ENCRYPTED 
       attachments,
     });
 
-    let finalEnvelopeBlob;
-    const session = await getSessionKeys(keyRecord.id);
+    let finalEnvelopeBlob: Blob | undefined;
+    
+    // À ce stade, TypeScript sait que si (sign || encrypt) est vrai, keyRecord est défini
+    // Mais pour satisfaire l'analyseur strict, on ajoute une assertion ou une garde locale
+    const currentKeyRecord = keyRecord as KeyRecord;
+    const session = await getSessionKeys(currentKeyRecord.id);
 
     // 2. Traitement des combinaisons Cryptographiques (Sign, Encrypt, ou Sign+Encrypt)
     if (encrypt) {
@@ -259,7 +299,7 @@ export async function onComposeSend(req) {//TODO EDIT TO SEND TO SELF ENCRYPTED 
       }
 
       // Chiffrement global
-      const encryptedBlob = await pgpEncrypt(payloadToEncrypt, found, keyRecord.publicKey, useAes128());
+      const encryptedBlob = await pgpEncrypt(payloadToEncrypt, found, currentKeyRecord.publicKey, useAes128());
       
       // Encapsulation au standard strict PGP/MIME multipart/encrypted (RFC 3156)
       finalEnvelopeBlob = wrapAsPgpMimeEncrypted(encryptedBlob, {
@@ -274,9 +314,16 @@ export async function onComposeSend(req) {//TODO EDIT TO SEND TO SELF ENCRYPTED 
       }
       const signatureBlob = await pgpSignDetached(clearMimeBytes, session.signingKey);
       
-      finalEnvelopeBlob = wrapAsPgpMimeSigned(clearMimeBytes, signatureBlob, {
+    //convert clearMimeBytes to blob
+    const clearMimeBytesBlob = new Blob([clearMimeBytes.slice().buffer], { type: 'application/octet-stream' });
+
+      finalEnvelopeBlob = wrapAsPgpMimeSigned(clearMimeBytesBlob, signatureBlob, {
         from, to, cc, subject: req.subject || '', inReplyTo: req.inReplyTo, references: req.references, messageId: req.messageId
       });
+    }
+
+    if (!finalEnvelopeBlob) {
+      throw new Error('Cryptographic processing failed to generate an output envelope.');
     }
 
     // 3. Extraction et soumission brute au serveur JMAP
@@ -292,7 +339,7 @@ export async function onComposeSend(req) {//TODO EDIT TO SEND TO SELF ENCRYPTED 
 
     await host.storage.set(INTENT_KEY, {});
     return false;
-  } catch (err) {
+  } catch (err: any) {
     host.log.error('onComposeSend failed', err);
     host.toast.error(`OpenPGP send failed: ${err && err.message ? err.message : String(err)}`);
     return false;
@@ -301,7 +348,7 @@ export async function onComposeSend(req) {//TODO EDIT TO SEND TO SELF ENCRYPTED 
 
 // ─── Render-body takeover (verify / decrypt) ───────────────────────────
 
-async function maybeAutoImportSigner(status) {
+async function maybeAutoImportSigner(status:any) {
   if (settings().autoImportSignerCerts === false) return;
   const cert = status && status.signerCert; // On garde .signerCert pour la compatibilité sémantique de l'UI
   if (!cert || !status.signatureValid || !cert.email) return;
@@ -325,29 +372,29 @@ async function maybeAutoImportSigner(status) {
   }
 }
 
-function statusNoticeHtml(message, tone) {
+function statusNoticeHtml(message: string, tone: string) {
   const color = tone === 'error' ? 'var(--color-destructive, #dc2626)'
     : tone === 'ok' ? 'var(--color-success, #16a34a)'
       : 'var(--color-muted-foreground, #64748b)';
   return `<div style="padding:12px;border:1px solid ${color};border-radius:8px;color:${color};font-size:14px;">${message}</div>`;
 }
 
-async function persistVerifyStatus(emailId, status) {
+async function persistVerifyStatus(emailId: string, status: any) {
   if (!emailId) return;
   try { await host.storage.set(VERIFY_PREFIX + emailId, status); } catch { /* ignore */ }
 }
 
-export async function onRenderEmailBody(body, ctx) {
+export async function onRenderEmailBody(body: any, ctx: any) {
   if (!ctx) return undefined;
   if (!(await isCapable())) return undefined;
 
-  // Détection OpenPGP (gère le PGP/MIME et le Inline)
-  const detection = detectPgp(ctx.contentType, ctx.bodyStructure, ctx.attachments);
+  // Détection OpenPGP
+  const detection = detectPgp(ctx.contentType, ctx.bodyStructure, ctx.attachments, ctx.textBody);
   if (!detection.type) return undefined;
 
   if (!detection.supported) {
     const status = {
-      isSigned: detection.type === 'detached-sig',
+      isSigned: detection.type === 'pgp-signature-file' || detection.type === 'pgp-mime-signed',
       isEncrypted: false,
       unsupportedReason: `Unsupported OpenPGP layout (${detection.type})`,
     };
@@ -362,14 +409,14 @@ export async function onRenderEmailBody(body, ctx) {
 
   try {
     const raw = await host.jmap.fetchBlob(blobId);
-    const pgpMessageContent = normalizePgpMessage(bytesArrayBuffer(raw instanceof Uint8Array ? raw : new Uint8Array(raw)));
+    const pgpMessageContent = normalizePgpMessage(new Uint8Array(await raw.arrayBuffer()));
 
-    // ── Cas 1 : Traitement du Payload Chiffré ─────────────────────────
-    if (detection.type === 'enveloped-data') {
+    // ── Cas 1 : Traitement du Payload Chiffré (Vérification harmonisée) ──
+    if (detection.type === 'pgp-mime-encrypted' || detection.type === 'pgp-inline-encrypted' || detection.type === 'pgp-encrypted-file') {
       const { keyRecords, unlockedKeys } = await unlockedDecryptMaps();
       let result;
       try {
-        result = await pgpDecrypt({ cmsBytes: pgpMessageContent, keyRecords, unlockedKeys });
+        result = await pgpDecrypt({ cmsBytes: new TextEncoder().encode(pgpMessageContent), keyRecords, unlockedKeys });
       } catch (err) {
         if (err instanceof PgpKeyLockedError) {
           const status = { isEncrypted: true, decryptionSuccess: false, decryptionError: 'locked' };
@@ -383,7 +430,7 @@ export async function onRenderEmailBody(body, ctx) {
             verification: status,
           };
         }
-        const status = { isEncrypted: true, decryptionSuccess: false, decryptionError: err && err.message ? err.message : String(err) };
+        const status = { isEncrypted: true, decryptionSuccess: false, decryptionError: String(err) };
         await persistVerifyStatus(ctx.id, status);
         return {
           ...body,
@@ -395,11 +442,9 @@ export async function onRenderEmailBody(body, ctx) {
         };
       }
 
-      // Traitement des signatures combinées à l'intérieur du flux déchiffré
       let innerBytes = result.mimeBytes;
       const verification = { isEncrypted: true, decryptionSuccess: true };
       
-      // On teste si le contenu extrait est lui-même signé (Inline ou structure imbriquée)
       try {
         const v = await pgpVerify(innerBytes, fromEmail);
         if (v.status && v.status.signatureValid) {
@@ -407,7 +452,7 @@ export async function onRenderEmailBody(body, ctx) {
           Object.assign(verification, v.status, { isEncrypted: true, decryptionSuccess: true });
           await maybeAutoImportSigner(v.status);
         }
-      } catch { /* Contenu uniquement chiffré, pas de signature interne */ }
+      } catch { /* Uniquement chiffré */ }
 
       const parsed = parseMime(innerBytes);
       await persistVerifyStatus(ctx.id, verification);
@@ -421,13 +466,14 @@ export async function onRenderEmailBody(body, ctx) {
       };
     }
 
-    // ── Cas 2 : Traitement du Payload Signé uniquement ────────────────
-    if (detection.type === 'signed-data') {
-      // Si signature détachée, le bloc signature est extrait de l'objet de détection des pièces jointes
+    // ── Cas 2 : Traitement du Payload Signé (Vérification harmonisée) ──
+    if (detection.type === 'pgp-mime-signed' || detection.type === 'pgp-inline-signed' || detection.type === 'pgp-signature-file') {
+      
+      // TS compile correctement car signatureBlobId est désormais défini dans l'interface PgpDetectionResult
       const signatureBlock = detection.signatureBlobId ? await host.jmap.fetchBlob(detection.signatureBlobId) : null;
       const signatureString = signatureBlock ? new TextDecoder().decode(await blobToBytes(signatureBlock)) : null;
 
-      const v = await pgpVerify(pgpMessageContent, fromEmail, signatureString);
+      const v = await pgpVerify(new TextEncoder().encode(pgpMessageContent), fromEmail, signatureString);
       await maybeAutoImportSigner(v.status);
       
       const parsed = parseMime(v.mimeBytes);
@@ -478,18 +524,26 @@ const inputStyle = { // Renommé pour éviter les collisions sémantiques avec l
   boxSizing: 'border-box',
 };
 
-function fmtDate(iso) {
+function fmtDate(iso: string | number | Date | null) {
   try { return iso ? new Date(iso).toLocaleDateString() : 'Never expires'; } catch { return iso; }
 }
-function isExpired(iso) {
+function isExpired(iso: string | number | Date | null) {
+  if(!iso) return false;
   try { return iso ? new Date(iso).getTime() < Date.now() : false; } catch { return false; }
 }
 
 // ─── UI: composer toolbar (Sign / Encrypt toggles) ─────────────────────
 
+// 1. Définition de l'interface pour l'état d'intention
+interface PgpIntent {
+  sign: boolean;
+  encrypt: boolean;
+}
+
 function ComposerToolbar() {
-  const [intent, setIntent] = useState({ sign: false, encrypt: false });
-  const [ready, setReady] = useState(false);
+  // Application du type générique à l'état
+  const [intent, setIntent] = useState<PgpIntent>({ sign: false, encrypt: false });
+  const [ready, setReady] = useState<boolean>(false);
 
   useEffect(() => {
     let alive = true;
@@ -500,8 +554,8 @@ function ComposerToolbar() {
         const prefs = await getPrefs();
         if (alive) {
           setIntent({
-            sign: typeof stored.sign === 'boolean' ? stored.sign : prefs.defaultSign,
-            encrypt: typeof stored.encrypt === 'boolean' ? stored.encrypt : prefs.defaultEncrypt,
+            sign: typeof stored.sign === 'boolean' ? stored.sign : !!prefs.defaultSign,
+            encrypt: typeof stored.encrypt === 'boolean' ? stored.encrypt : !!prefs.defaultEncrypt,
           });
         }
         const recs = await listKeyRecords();
@@ -511,14 +565,16 @@ function ComposerToolbar() {
     return () => { alive = false; };
   }, []);
 
-  const update = useCallback(async (next) => {
+  // Typage explicite du paramètre de mise à jour
+  const update = useCallback(async (next: PgpIntent) => {
     setIntent(next);
     await host.storage.set(INTENT_KEY, next);
   }, []);
 
-  const toggle = (key) => update({ ...intent, [key]: !intent[key] });
+  // 2. Correction principale : key doit être une clé valide de PgpIntent ('sign' | 'encrypt')
+  const toggle = (key: keyof PgpIntent) => update({ ...intent, [key]: !intent[key] });
 
-  const pill = (active) => ({
+  const pill = (active: boolean) => ({
     ...btn,
     background: active ? 'var(--color-primary, #2563eb)' : 'var(--color-muted, #f1f5f9)',
     color: active ? '#fff' : 'var(--color-foreground, #0f172a)',
@@ -535,46 +591,96 @@ function ComposerToolbar() {
       type: 'button',
       style: pill(intent.sign),
       title: 'Digitally sign this message',
-      onClick: () => toggle('sign'),
+      onClick: () => toggle('sign'), // Validé par TypeScript
     }, intent.sign ? '✓ Sign' : 'Sign'),
     h('button', {
       type: 'button',
       style: pill(intent.encrypt),
       title: 'Encrypt this message to its recipients',
-      onClick: () => toggle('encrypt'),
+      onClick: () => toggle('encrypt'), // Validé par TypeScript
     }, intent.encrypt ? '✓ Encrypt' : 'Encrypt'),
   );
 }
 
 // ─── UI: email banner (verification / encryption status) ───────────────
 
-function EmailBanner(props) {
+// --- Déclaration des types et interfaces ---
+interface EmailHeaders {
+  'Content-Type'?: string | string[];
+  'content-type'?: string | string[];
+  [key: string]: any;
+}
+
+interface EmailProps {
+  email?: {
+    id: string;
+    headers?: EmailHeaders;
+    [key: string]: any;
+  };
+}
+
+interface SignerCert {
+  email?: string;
+  [key: string]: any;
+}
+
+interface VerificationStatus {
+  isEncrypted?: boolean;
+  isSigned?: boolean;
+  decryptionSuccess?: boolean;
+  decryptionError?: string;
+  signerCert?: SignerCert;
+  signatureValid?: boolean;
+  signerEmailMatch?: boolean;
+  selfSigned?: boolean;
+  signatureError?: string;
+  unsupportedReason?: string;
+}
+
+// Type pour les lignes d'affichage du composant
+type Tone = 'ok' | 'warn' | 'error' | 'muted';
+type BannerRow = [string, string, Tone];
+
+function EmailBanner(props: EmailProps) {
   const email = props && props.email;
-  const [status, setStatus] = useState(null);
-  const [loaded, setLoaded] = useState(false);
+  
+  // Correction ici : typage explicite de l'état avec l'interface VerificationStatus
+  const [status, setStatus] = useState<VerificationStatus | null>(null);
+  const [loaded, setLoaded] = useState<boolean>(false);
 
   useEffect(() => {
     let alive = true;
     (async () => {
       if (!email || !email.id) { setLoaded(true); return; }
-      let s = await host.storage.get(VERIFY_PREFIX + email.id);
+      
+      let s: VerificationStatus | null = await host.storage.get(VERIFY_PREFIX + email.id);
+      
       if (!s) {
         // Détection à la volée via les en-têtes si le hook de rendu n'a pas encore fini
         const ct = email.headers && (email.headers['Content-Type'] || email.headers['content-type']);
-        const ctStr = Array.isArray(ct) ? ct[0] : ct;
+        const ctStr = Array.isArray(ct) ? ct[0] : (ct as string | undefined);
         
         // Simulation minimale de détection basée sur les structures de détection OpenPGP
-        if (ctStr && ctStr.includes('multipart/encrypted')) s = { isEncrypted: true };
-        else if (ctStr && ctStr.includes('multipart/signed')) s = { isSigned: true };
+        if (ctStr && ctStr.includes('multipart/encrypted')) {
+          s = { isEncrypted: true };
+        } else if (ctStr && ctStr.includes('multipart/signed')) {
+          s = { isSigned: true };
+        }
       }
-      if (alive) { setStatus(s || null); setLoaded(true); }
+      
+      if (alive) { 
+        setStatus(s || null); 
+        setLoaded(true); 
+      }
     })();
+    
     return () => { alive = false; };
   }, [email && email.id]);
 
   if (!loaded || !status) return null;
 
-  const rows = [];
+  // Typage strict du tableau de lignes
+  const rows: BannerRow[] = [];
   const warnSelfSigned = settings().warnOnSelfSigned !== false;
 
   if (status.isEncrypted) {
@@ -584,7 +690,6 @@ function EmailBanner(props) {
     else rows.push(['🔒', 'Encrypted OpenPGP message', 'muted']);
   }
   
-  // Utilisation de .signerCert par compatibilité sémantique (contient les métadonnées de la clé publique de signature)
   if (status.isSigned || status.signerCert) {
     if (status.signatureValid) {
       const who = status.signerCert && status.signerCert.email ? ` by ${status.signerCert.email}` : '';
@@ -601,7 +706,9 @@ function EmailBanner(props) {
 
   if (rows.length === 0) return null;
 
-  const toneColor = (tone) => tone === 'ok' ? 'var(--color-success, #16a34a)'
+  // Typage de l'argument de toneColor
+  const toneColor = (tone: Tone): string => 
+    tone === 'ok' ? 'var(--color-success, #16a34a)'
     : tone === 'error' ? 'var(--color-destructive, #dc2626)'
       : tone === 'warn' ? 'var(--color-warning, #d97706)'
         : 'var(--color-muted-foreground, #64748b)';
@@ -624,22 +731,32 @@ function EmailBanner(props) {
 
 // ─── UI: settings section (key management) ─────────────────────────────
 
+interface Prefs {
+  defaultSign?: boolean;
+  defaultEncrypt?: boolean;
+  [key: string]: any;
+}
+
 function SettingsSection() {
-  const [keys, setKeys] = useState([]);
-  const [certs, setCerts] = useState([]); // Représente les clés publiques destinataires (anciennement certs)
-  const [prefs, setPrefsState] = useState(DEFAULT_PREFS);
-  const [unlocked, setUnlocked] = useState({}); // id -> bool
-  const [busy, setBusy] = useState(false);
-  const [capable, setCapable] = useState(true);
-  const fileRef = useRef(null);
-  const certFileRef = useRef(null);
+  const [keys, setKeys] = useState<KeyRecord[]>([]);
+  const [certs, setCerts] = useState<PublicCert[]>([]); 
+  const [prefs, setPrefsState] = useState<Prefs>(DEFAULT_PREFS);
+  const [unlocked, setUnlocked] = useState<Record<string, boolean>>({});
+  const [busy, setBusy] = useState<boolean>(false);
+  const [capable, setCapable] = useState<boolean>(true);
+  
+  const fileRef = useRef<HTMLInputElement | null>(null);
+  const certFileRef = useRef<HTMLInputElement | null>(null);
 
   const refresh = useCallback(async () => {
     if (!(await isCapable())) { setCapable(false); return; }
     const [k, c, p] = await Promise.all([listKeyRecords(), listPublicCerts(), getPrefs()]);
     setKeys(k); setCerts(c); setPrefsState(p);
-    const u = {};
-    for (const rec of k) u[rec.id] = !!(await getSessionKeys(rec.id));
+    
+    const u: Record<string, boolean> = {};
+    for (const rec of k) {
+      u[rec.id] = !!(await getSessionKeys(rec.id));
+    }
     setUnlocked(u);
   }, []);
 
@@ -656,16 +773,13 @@ function SettingsSection() {
     const file = fileRef.current && fileRef.current.files && fileRef.current.files[0];
     if (!file) return;
     
-    // En OpenPGP, on importe un bloc ASCII Armored (.asc, .key) de clé privée ou une clé exportée
     const storagePass = window.prompt('Enter your OpenPGP passphrase to decrypt and import this private key:');
     if (storagePass === null) return;
     
     setBusy(true);
     try {
       const text = new TextDecoder().decode(await file.arrayBuffer());
-      
-      // Utilisation du nouveau hook d'importation OpenPGP (défini dans votre module d'import de clé)
-      const { importOpenPgpPrivateKey } = await import('./pgp-import.js');
+     
       const { keyRecord } = await importOpenPgpPrivateKey(text, storagePass);
       
       await saveKeyRecord(keyRecord);
@@ -673,38 +787,46 @@ function SettingsSection() {
       if (fileRef.current) fileRef.current.value = '';
       await refresh();
     } catch (err) {
-      host.toast.error(`Import failed: ${err && err.message ? err.message : String(err)}`);
+      const error = err as Error;
+      host.toast.error(`Import failed: ${error?.message ? error.message : String(err)}`);
     } finally {
       setBusy(false);
     }
   }
 
-  async function unlock(rec) {
-    const pass = window.prompt(`Passphrase to unlock the OpenPGP key for ${rec.email || 'this identity'}:`);
-    if (!pass) return;
-    setBusy(true);
-    try {
-      const { unlockPrivateKey } = await import('./pgp-import.js');
-      const { signingKey, decryptionKey } = await unlockPrivateKey(rec, pass);
-      
-      // Stockage de la clé déverrouillée en mémoire de session IndexedDB
-      await saveSessionKeys({ id: rec.id, signingKey, decryptionKey });
-      host.toast.success(`Unlocked ${rec.email || 'key'}`);
-      await refresh();
-    } catch (err) {
-      host.toast.error(err && err.message ? err.message : 'Unlock failed');
-    } finally {
-      setBusy(false);
-    }
+  async function unlock(rec: KeyRecord) {
+  const pass = window.prompt(`Passphrase to unlock the OpenPGP key for ${rec.email || 'this identity'}:`);
+  if (!pass) return;
+  setBusy(true);
+  try {
+    // Note : Pensez à importer l'extension compilée .js ou le module selon votre configuration de build (souvent ./pgp-import.js)
+    const { unlockedPrivateKey, signingKey, decryptionKey } = await unlockPrivateKey(rec, pass);
+    
+    // Inclusion de unlockedPrivateKey pour satisfaire le contrat strict de SessionKeysEntry
+    await saveSessionKeys({ 
+      id: rec.id, 
+      unlockedPrivateKey, 
+      signingKey, 
+      decryptionKey 
+    });
+    
+    host.toast.success(`Unlocked ${rec.email || 'key'}`);
+    await refresh();
+  } catch (err) {
+    const error = err as Error;
+    host.toast.error(error?.message ? error.message : 'Unlock failed');
+  } finally {
+    setBusy(false);
   }
+}
 
-  async function lock(rec) {
+  async function lock(rec: KeyRecord) {
     await deleteSessionKeys(rec.id);
     host.toast.info(`Locked ${rec.email || 'key'}`);
     await refresh();
   }
 
-  async function removeKey(rec) {
+  async function removeKey(rec: KeyRecord) {
     const ok = await host.ui.confirm({
       title: 'Delete OpenPGP key',
       message: `Delete the private key and public identity for ${rec.email || 'this identity'}? You will no longer be able to decrypt mail encrypted to it.`,
@@ -727,6 +849,7 @@ function SettingsSection() {
       
       const openpgp = await import('openpgp');
       const readKey = await openpgp.readKey({ armoredKey: text });
+      
       const info = await extractKeyInfo(readKey);
       
       const email = (info.emailAddresses[0] || '').toLowerCase();
@@ -735,7 +858,7 @@ function SettingsSection() {
       await savePublicCert({
         id: generateUUID(),
         email,
-        publicKey: text, // On stocke le bloc Armored textuel sous le champ publicKey
+        publicKey: text,
         issuer: info.issuer,
         subject: info.subject,
         notBefore: info.notBefore,
@@ -747,18 +870,19 @@ function SettingsSection() {
       if (certFileRef.current) certFileRef.current.value = '';
       await refresh();
     } catch (err) {
-      host.toast.error(`Key import failed: ${err && err.message ? err.message : String(err)}`);
+      const error = err as Error;
+      host.toast.error(`Key import failed: ${error?.message ? error.message : String(err)}`);
     } finally {
       setBusy(false);
     }
   }
 
-  async function removeCert(c) {
+  async function removeCert(c: PublicCert) {
     await deletePublicCert(c.id);
     await refresh();
   }
 
-  async function setPref(key, value) {
+  async function setPref(key: keyof Prefs, value: boolean) {
     const next = { ...prefs, [key]: value };
     setPrefsState(next);
     await setPrefs(next);
@@ -857,7 +981,7 @@ export const slots = {
   'settings-section': { component: SettingsSection, order: 100 },
 };
 
-export async function activate(api) {
+export async function activate(api :any) {
   if (!(await isCapable())) {
     api.log.error(NOT_PRIVILEGED_MSG);
     try { api.toast.error('OpenPGP needs the privileged tier — see plugin logs.'); } catch { /* ignore */ }

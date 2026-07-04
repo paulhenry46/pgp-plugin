@@ -8,13 +8,14 @@ import { extractKeyInfo } from './pgp-key-utils.js';
 
 /**
  * Vérifie la signature OpenPGP d'un message et en extrait le statut complet ainsi que le contenu.
- * supporte à la fois le mode Inline/Cleartext et le mode PGP/MIME (via pgpSignatureBlock).
- * * @param {Uint8Array} contentBytes - Les octets du message (le payload chiffré/MIME ou le bloc complet si Inline).
+ * Supporte à la fois le mode Inline/Cleartext et le mode PGP/MIME (via pgpSignatureBlock).
+ * @param {Uint8Array} contentBytes - Les octets du message (le payload chiffré/MIME ou le bloc complet si Inline).
  * @param {string} fromHeader - L'adresse e-mail de l'expéditeur extraite de l'en-tête "From" de l'e-mail.
  * @param {string|null} pgpSignatureBlock - Optionnel. Le bloc de signature ASCII détaché (pour le format PGP/MIME).
+ * @param {Array<openpgp.PublicKey>} [knownPublicKeys=[]] - Optionnel. Clés publiques connues (ex: récupérées depuis IndexedDB) pour valider la signature.
  * @returns {Promise<{ mimeBytes: Uint8Array, status: Object }>}
  */
-export async function pgpVerify(contentBytes, fromHeader, pgpSignatureBlock = null) {
+export async function pgpVerify(contentBytes: Uint8Array, fromHeader: string, pgpSignatureBlock : string | null = null, knownPublicKeys: openpgp.PublicKey[] = []) {
   let verificationResult;
   let mimeBytes = contentBytes;
 
@@ -24,13 +25,10 @@ export async function pgpVerify(contentBytes, fromHeader, pgpSignatureBlock = nu
       const message = await openpgp.createMessage({ binary: contentBytes });
       const signature = await openpgp.readSignature({ armoredSignature: pgpSignatureBlock });
       
-      // On extrait la clé publique publique intégrée pour pouvoir valider cryptographiquement la signature
-      const verificationKeys = await signature.getSigningKeyIDs();
-
       verificationResult = await openpgp.verify({
         message,
         signature,
-        verificationKeys: [] // openpgp va chercher à apparier via les signatures publiques connues ou récupérées
+        verificationKeys: knownPublicKeys // On passe les clés connues ici pour la validation
       });
     } else {
       // ── Cas 2 : Format PGP Inline (Signature enveloppée ou texte clair) ──
@@ -39,8 +37,8 @@ export async function pgpVerify(contentBytes, fromHeader, pgpSignatureBlock = nu
       
       verificationResult = await openpgp.verify({
         message,
-        verificationKeys: [],
-        format: 'binary' // Permet de récupérer le flux de données natif
+        verificationKeys: knownPublicKeys, // On passe les clés connues ici aussi
+        format: 'binary'
       });
       
       mimeBytes = verificationResult.data;
@@ -64,26 +62,38 @@ export async function pgpVerify(contentBytes, fromHeader, pgpSignatureBlock = nu
   let signerEmailMatch = false;
 
   try {
-    // Analyse du premier tag de signature retourné
     const signatures = verificationResult.signatures;
     if (signatures && signatures.length > 0) {
-      const sig = signatures[0];
+      const sig = signatures[0]; // Respecte strictement l'interface VerificationResult
       
       try {
-        await sig.verified; // Lève une exception si la signature cryptographique est invalide
+        // 1. On attend la promesse 'verified' qui lève une exception si la clé est manquante ou invalide
+        await sig.verified; 
         signatureValid = true;
       } catch (err) {
         signatureValid = false;
         signatureError = err instanceof Error ? err.message : 'Signature cryptographique invalide';
       }
 
-      // Extraction des clés du signataire associées
-      const signingKey = sig.signingKey;
+      // 2. Récupération de l'ID de clé au format Hexa pour les logs ou messages d'erreur
+      const signerKeyID = sig.keyID.toHex().toUpperCase();
+
+      // 3. Pour retrouver la clé qui a signé, on cherche dans le tableau 'knownPublicKeys' 
+      //    celle dont l'ID correspond à l'ID de la signature.
+      let signingKey = null;
+      for (const key of knownPublicKeys) {
+        if (key.getKeyID().toHex().toUpperCase() === signerKeyID) {
+          signingKey = key;
+          break;
+        }
+      }
+
+      // Si la clé fait partie de vos clés de confiance passées en argument, on extrait ses infos
       if (signingKey) {
         const keyInfo = await extractKeyInfo(signingKey);
         const signerEmail = keyInfo.emailAddresses[0] ?? '';
 
-        // Validation des dates de validité de la clé du signataire
+        // Validation des plages de validité de la clé
         const now = new Date();
         const notBefore = new Date(keyInfo.notBefore);
         const notAfter = keyInfo.notAfter ? new Date(keyInfo.notAfter) : null;
@@ -93,7 +103,7 @@ export async function pgpVerify(contentBytes, fromHeader, pgpSignatureBlock = nu
         
         if (signatureError) signatureValid = false;
 
-        // Préparation de l'enregistrement de la clé publique pour IndexedDB (public-certs)
+        // Préparation du payload pour l'UI / IndexedDB
         signerPublicRecord = {
           id: `signer-${keyInfo.fingerprint.replace(/:/g, '')}`,
           email: signerEmail.toLowerCase(),
@@ -106,9 +116,15 @@ export async function pgpVerify(contentBytes, fromHeader, pgpSignatureBlock = nu
           source: 'signed-email',
         };
 
-        // Alignement avec l'en-tête de l'enveloppe SMTP (From:)
         if (fromHeader && signerEmail) {
           signerEmailMatch = fromHeader.toLowerCase().trim() === signerEmail.toLowerCase().trim();
+        }
+      } else {
+        // Si la clé n'était pas dans knownPublicKeys, la promesse 'sig.verified' a levé une exception.
+        // On s'assure d'avoir un message explicite.
+        signatureValid = false;
+        if (!signatureError) {
+          signatureError = `Clé publique inconnue ou absente du trousseau local (Key ID: ${signerKeyID}).`;
         }
       }
     } else {
@@ -116,7 +132,7 @@ export async function pgpVerify(contentBytes, fromHeader, pgpSignatureBlock = nu
     }
   } catch (err) {
     signatureValid = false;
-    signatureError = 'Erreur lors du traitement des métadonnées de signature: ' + err.message;
+    signatureError = 'Erreur lors du traitement des métadonnées de signature: ' + (err instanceof Error ? err.message : String(err));
   }
 
   return {
@@ -126,9 +142,9 @@ export async function pgpVerify(contentBytes, fromHeader, pgpSignatureBlock = nu
       isEncrypted: false,
       signatureValid,
       signatureError,
-      signerCert: signerPublicRecord, // On garde la dénomination structurelle pour limiter les impacts de refactoring UI
+      signerCert: signerPublicRecord, 
       signerEmailMatch,
-      selfSigned: true, // En PGP, toutes les signatures de confiance sont portées par auto-signature (Web of Trust)
+      selfSigned: true, 
     },
   };
 }

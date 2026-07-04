@@ -1,0 +1,178 @@
+/**
+ * IndexedDB persistence for the OpenPGP plugin.
+ *
+ * Three stores:
+ * - key-records:   encrypted-at-rest private keys + public keys (durable)
+ * - public-certs:  recipient/contact public PGP keys (durable)
+ * - session-keys:  unlocked OpenPGP private key objects (session-scoped)
+ */
+
+import * as openpgp from 'openpgp';
+
+const DB_NAME = 'pgp-plugin-store';
+const DB_VERSION = 1;
+const KEY_RECORDS_STORE = 'key-records';
+const PUBLIC_CERTS_STORE = 'public-certs';
+const SESSION_KEYS_STORE = 'session-keys';
+
+// ── Définitions des Interfaces ──────────────────────────────────────
+
+export interface KeyRecord {
+  id: string;
+  email: string;
+  accountId?: string;
+  publicKey: string;
+  encryptedPrivateKey: ArrayBuffer; // Corrigé : Format binaire brut AES-GCM
+  salt: ArrayBuffer;                // Ajouté : Requis pour la dérivation PBKDF2 au déverrouillage
+  iv: ArrayBuffer;                  // Ajouté : Requis pour l'initialisation AES-GCM
+  kdfIterations: number;            // Ajouté : Requis pour la cohérence de dérivation
+  issuer: string;
+  subject: string;
+  serialNumber: string;             // Équivalent hexadécimal du KeyID PGP
+  notBefore: string;                // Date ISO standardisée
+  notAfter: string | null;          // Date ISO ou null si pas d'expiration
+  fingerprint: string;
+  algorithm: string;
+  capabilities: {
+    canSign: boolean;
+    canEncrypt: boolean;
+  };
+}
+
+export interface PublicCert {
+  id: string;
+  email: string;
+  accountId?: string;
+  publicKey: string;
+  issuer: string;
+  subject: string;
+  notBefore: string;
+  notAfter: string | null;
+  fingerprint: string;
+  source: string;
+}
+
+export interface SessionKeysEntry {
+  id: string; 
+  unlockedPrivateKey: openpgp.PrivateKey; // Précisé au lieu de any
+  signingKey: openpgp.PrivateKey;         // Précisé au lieu de any   
+  decryptionKey: openpgp.PrivateKey;      // Précisé au lieu de any
+}
+
+// ── Moteur de Base de Données ───────────────────────────────────────
+
+function openDB(): Promise<IDBDatabase> {
+  return new Promise((resolve, reject) => {
+    const request = indexedDB.open(DB_NAME, DB_VERSION);
+    
+    request.onupgradeneeded = () => {
+      const db = request.result;
+      if (!db.objectStoreNames.contains(KEY_RECORDS_STORE)) {
+        const keyStore = db.createObjectStore(KEY_RECORDS_STORE, { keyPath: 'id' });
+        keyStore.createIndex('email', 'email', { unique: false });
+        keyStore.createIndex('accountId', 'accountId', { unique: false });
+      }
+      if (!db.objectStoreNames.contains(PUBLIC_CERTS_STORE)) {
+        const certStore = db.createObjectStore(PUBLIC_CERTS_STORE, { keyPath: 'id' });
+        certStore.createIndex('email', 'email', { unique: false });
+        certStore.createIndex('accountId', 'accountId', { unique: false });
+      }
+      if (!db.objectStoreNames.contains(SESSION_KEYS_STORE)) {
+        db.createObjectStore(SESSION_KEYS_STORE, { keyPath: 'id' });
+      }
+    };
+    
+    request.onsuccess = () => resolve(request.result);
+    request.onerror = () => reject(request.error);
+  });
+}
+
+/**
+ * Encapsule une opération de transaction dans une promesse typée.
+ */
+function txPromise<T>(
+  db: IDBDatabase, 
+  storeName: string, 
+  mode: IDBTransactionMode, 
+  fn: (store: IDBObjectStore) => IDBRequest
+): Promise<T> {
+  return new Promise((resolve, reject) => {
+    const tx = db.transaction(storeName, mode);
+    const store = tx.objectStore(storeName);
+    const req = fn(store);
+    
+    req.onsuccess = () => resolve(req.result as T);
+    req.onerror = () => reject(req.error);
+  });
+}
+
+// ── Private Key Records CRUD ────────────────────────────────────────
+
+export async function saveKeyRecord(record: KeyRecord): Promise<void> {
+  const db = await openDB();
+  await txPromise<IDBValidKey>(db, KEY_RECORDS_STORE, 'readwrite', (s) => s.put(record));
+}
+
+export async function getKeyRecord(id: string): Promise<KeyRecord | undefined> {
+  const db = await openDB();
+  return txPromise<KeyRecord | undefined>(db, KEY_RECORDS_STORE, 'readonly', (s) => s.get(id));
+}
+
+export async function listKeyRecords(accountId?: string): Promise<KeyRecord[]> {
+  const db = await openDB();
+  const all = await txPromise<KeyRecord[]>(db, KEY_RECORDS_STORE, 'readonly', (s) => s.getAll());
+  if (!accountId) return all;
+  return all.filter((r) => r.accountId === accountId || !r.accountId);
+}
+
+export async function deleteKeyRecord(id: string): Promise<void> {
+  const db = await openDB();
+  await txPromise<undefined>(db, KEY_RECORDS_STORE, 'readwrite', (s) => s.delete(id));
+}
+
+// ── Public Keys (Contacts) CRUD ─────────────────────────────────────
+
+export async function savePublicCert(cert: PublicCert): Promise<void> {
+  const db = await openDB();
+  await txPromise<IDBValidKey>(db, PUBLIC_CERTS_STORE, 'readwrite', (s) => s.put(cert));
+}
+
+export async function listPublicCerts(accountId?: string): Promise<PublicCert[]> {
+  const db = await openDB();
+  const all = await txPromise<PublicCert[]>(db, PUBLIC_CERTS_STORE, 'readonly', (s) => s.getAll());
+  if (!accountId) return all;
+  return all.filter((c) => c.accountId === accountId || !c.accountId);
+}
+
+export async function deletePublicCert(id: string): Promise<void> {
+  const db = await openDB();
+  await txPromise<undefined>(db, PUBLIC_CERTS_STORE, 'readwrite', (s) => s.delete(id));
+}
+
+// ── Session (unlocked OpenPGP Key Objects) CRUD ─────────────────────
+
+export async function saveSessionKeys(entry: SessionKeysEntry): Promise<void> {
+  const db = await openDB();
+  await txPromise<IDBValidKey>(db, SESSION_KEYS_STORE, 'readwrite', (s) => s.put(entry));
+}
+
+export async function getSessionKeys(id: string): Promise<SessionKeysEntry | undefined> {
+  const db = await openDB();
+  return txPromise<SessionKeysEntry | undefined>(db, SESSION_KEYS_STORE, 'readonly', (s) => s.get(id));
+}
+
+export async function listSessionKeyIds(): Promise<string[]> {
+  const db = await openDB();
+  const all = await txPromise<IDBValidKey[]>(db, SESSION_KEYS_STORE, 'readonly', (s) => s.getAllKeys());
+  return all as string[];
+}
+
+export async function deleteSessionKeys(id: string): Promise<void> {
+  const db = await openDB();
+  await txPromise<undefined>(db, SESSION_KEYS_STORE, 'readwrite', (s) => s.delete(id));
+}
+
+export async function clearSessionKeys(): Promise<void> {
+  const db = await openDB();
+  await txPromise<undefined>(db, SESSION_KEYS_STORE, 'readwrite', (s) => s.clear());
+}

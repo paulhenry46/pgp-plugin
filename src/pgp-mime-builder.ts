@@ -5,7 +5,7 @@
  */
 
 import { createMimeMessage } from 'mimetext/browser';
-import { generateUUID } from './util.js';
+import { generateUUID } from './util.ts';
 
 const CRLF = '\r\n';
 
@@ -15,7 +15,7 @@ const CRLF = '\r\n';
  * @param {Object} input 
  * @returns {Uint8Array} Les octets du message MIME structuré.
  */
-export function buildMimeMessage(input) {
+export function buildMimeMessage(input: any): Uint8Array {
   const msg = createMimeMessage();
 
   // 1. En-têtes basiques
@@ -32,13 +32,13 @@ export function buildMimeMessage(input) {
   }
 
   // 2. Gestion du corps (Texte / HTML)
-  if (input.textBody) msg.setMessage(input.textBody);
-  if (input.htmlBody) msg.setHTML(input.htmlBody);
+  if (input.textBody) msg.addMessage({ contentType: 'text/plain', data: input.textBody });
+  if (input.htmlBody) msg.addMessage({ contentType: 'text/html', data: input.htmlBody });
 
   // 3. Gestion des pièces jointes
   if (input.attachments?.length) {
     for (const att of input.attachments) {
-      msg.setAttachment(att.filename, att.contentType, base64EncodeRaw(att.content));
+      msg.addAttachment({ filename: att.filename, contentType: att.contentType, data: base64EncodeRaw(att.content) });
     }
   }
 
@@ -53,7 +53,7 @@ export function buildMimeMessage(input) {
  * @param {Object} input - Les métadonnées d'en-tête de l'e-mail.
  * @returns {Blob} Un blob au format message/rfc822 prêt à l'envoi.
  */
-export function wrapAsPgpMimeEncrypted(pgpEncryptedBlob, input) {
+export function wrapAsPgpMimeEncrypted(pgpEncryptedBlob: Blob | string, input: any): Blob {
   const boundary = generateBoundary();
   const lines = [];
 
@@ -101,7 +101,7 @@ export function wrapAsPgpMimeEncrypted(pgpEncryptedBlob, input) {
  * @param {Object} input - Les métadonnées d'en-tête de l'e-mail.
  * @returns {Blob} Un blob au format message/rfc822 prêt à l'envoi.
  */
-export function wrapAsPgpMimeSigned(clearMimeBytes, pgpSignatureBlob, input) {
+export function wrapAsPgpMimeSigned(clearMimeBytes: Blob | string, pgpSignatureBlob: Blob | string, input: any): Blob {
   const boundary = generateBoundary();
   const lines = [];
 
@@ -148,7 +148,7 @@ function generateBoundary() {
   return `----=_Part_${hex}`;
 }
 
-function formatAddress(addr) {
+function formatAddress(addr: { name?: string; email: string }) {
   if (addr.name) {
     const escaped = addr.name.replace(/\\/g, '\\\\').replace(/"/g, '\\"');
     return `"${escaped}" <${addr.email}>`;
@@ -156,7 +156,7 @@ function formatAddress(addr) {
   return addr.email;
 }
 
-function formatHeader(name, value) {
+function formatHeader(name: string, value: string) {
   const full = `${name}: ${value}`;
   if (full.length <= 76) return full;
   const parts = [];
@@ -174,7 +174,7 @@ function formatHeader(name, value) {
   return parts.join(CRLF);
 }
 
-function encodeHeaderValue(value) {
+function encodeHeaderValue(value: string) {
   if (/^[\x20-\x7e]*$/.test(value)) return value;
   const encoded = Array.from(new TextEncoder().encode(value))
     .map((b) => {
@@ -187,7 +187,7 @@ function encodeHeaderValue(value) {
   return `=?UTF-8?Q?${encoded}?=`;
 }
 
-function formatDate(date) {
+function formatDate(date: Date) {
   const days = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
   const months = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
   const d = days[date.getUTCDay()];
@@ -200,7 +200,7 @@ function formatDate(date) {
   return `${d}, ${dd} ${m} ${y} ${hh}:${mm}:${ss} +0000`;
 }
 
-function base64EncodeRaw(data) {
+function base64EncodeRaw(data: ArrayBuffer | Uint8Array) {
   const bytes = new Uint8Array(data);
   let binary = '';
   for (let i = 0; i < bytes.length; i++) binary += String.fromCharCode(bytes[i]);

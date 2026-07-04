@@ -6,10 +6,41 @@
 
 const decoder = new TextDecoder('utf-8', { fatal: false });
 
+export interface Attachment {
+  name: string;
+  type: string;
+  size: number;
+  dataUrl: string;
+}
+
+export interface ParseMimeResult {
+  html: string;
+  text: string;
+  attachments: Attachment[];
+  pgpSignatureBlock: string | null;
+}
+
+interface MimeNode {
+  type: string;
+  params: Record<string, string>;
+  cte: string;
+  disposition: string;
+  headers: Record<string, string>;
+  body: string;
+  children: MimeNode[];
+}
+
+interface OutputCollector {
+  html: string;
+  text: string;
+  attachments: Attachment[];
+  pgpSignatureBlock: string | null;
+}
+
 /** * Parse raw inner MIME bytes into { html, text, attachments, pgpSignatureBlock }.
  * Adds support for PGP Inline parsing and signatures isolation.
  */
-export function parseMime(bytes) {
+export function parseMime(bytes: Uint8Array): ParseMimeResult {
   const text = binaryString(bytes);
   
   // ── Cas Spécifique PGP Inline ──────────────────────────────────────
@@ -19,7 +50,7 @@ export function parseMime(bytes) {
   }
 
   const node = parseEntity(text);
-  const out = { html: '', text: '', attachments: [], pgpSignatureBlock: null };
+  const out: OutputCollector = { html: '', text: '', attachments: [], pgpSignatureBlock: null };
   collect(node, out);
   
   // Nettoyage : Si une pièce jointe est la signature PGP détachée (PGP/MIME),
@@ -43,7 +74,7 @@ export function parseMime(bytes) {
 }
 
 /** Traite un bloc de texte brut contenant du PGP sans structure MIME complexe */
-function parsePgpInline(rawText) {
+function parsePgpInline(rawText: string): ParseMimeResult {
   // Supprime les bruits d'en-têtes de transport HTTP/SMTP résiduels si présents
   const cleanText = rawText.trim();
   return {
@@ -55,16 +86,16 @@ function parsePgpInline(rawText) {
 }
 
 // Treat bytes as latin1 so byte boundaries survive; decode per-part by charset.
-function binaryString(bytes) {
+function binaryString(bytes: Uint8Array): string {
   let s = '';
   for (let i = 0; i < bytes.length; i++) s += String.fromCharCode(bytes[i]);
   return s;
 }
 
-function parseEntity(raw) {
+function parseEntity(raw: string): MimeNode {
   const sepMatch = raw.match(/\r?\n\r?\n/);
   const headerText = sepMatch ? raw.slice(0, sepMatch.index) : raw;
-  const body = sepMatch ? raw.slice(sepMatch.index + sepMatch[0].length) : '';
+  const body = (sepMatch && sepMatch.index) ? raw.slice(sepMatch.index + (sepMatch[0]?.length ?? 0)) : '';
 
   const headers = parseHeaders(headerText);
   const ctRaw = headers['content-type'] || 'text/plain';
@@ -72,7 +103,7 @@ function parseEntity(raw) {
   const cte = (headers['content-transfer-encoding'] || '7bit').trim().toLowerCase();
   const disposition = (headers['content-disposition'] || '').toLowerCase();
 
-  const node = { type, params, cte, disposition, headers, body, children: [] };
+  const node: MimeNode = { type, params, cte, disposition, headers, body, children: [] };
 
   if (type.startsWith('multipart/') && params.boundary) {
     node.children = splitMultipart(body, params.boundary).map(parseEntity);
@@ -80,9 +111,9 @@ function parseEntity(raw) {
   return node;
 }
 
-function parseHeaders(headerText) {
+function parseHeaders(headerText: string): Record<string, string> {
   const unfolded = headerText.replace(/\r?\n[ \t]+/g, ' ');
-  const headers = {};
+  const headers: Record<string, string> = {};
   for (const line of unfolded.split(/\r?\n/)) {
     const idx = line.indexOf(':');
     if (idx <= 0) continue;
@@ -93,27 +124,30 @@ function parseHeaders(headerText) {
   return headers;
 }
 
-function parseContentType(value) {
+function parseContentType(value: string): { type: string; params: Record<string, string> } {
   const parts = value.split(';');
-  const type = parts[0].trim().toLowerCase();
-  const params = {};
+  const type = parts[0]?.trim().toLowerCase() || 'text/plain';
+  const params: Record<string, string> = {};
   for (let i = 1; i < parts.length; i++) {
-    const eq = parts[i].indexOf('=');
+    const part = parts[i];
+    if (!part) continue;
+    const eq = part.indexOf('=');
     if (eq < 0) continue;
-    const k = parts[i].slice(0, eq).trim().toLowerCase();
-    let v = parts[i].slice(eq + 1).trim();
+    const k = part.slice(0, eq).trim().toLowerCase();
+    let v = part.slice(eq + 1).trim();
     if (v.startsWith('"') && v.endsWith('"')) v = v.slice(1, -1);
     params[k] = v;
   }
   return { type, params };
 }
 
-function splitMultipart(body, boundary) {
+function splitMultipart(body: string, boundary: string): string[] {
   const delim = `--${boundary}`;
-  const parts = [];
+  const parts: string[] = [];
   const segments = body.split(delim);
   for (let i = 1; i < segments.length; i++) {
     let seg = segments[i];
+    if (!seg) continue;
     if (seg.startsWith('--')) break; // closing delimiter
     seg = seg.replace(/^\r?\n/, '').replace(/\r?\n$/, '');
     parts.push(seg);
@@ -121,7 +155,7 @@ function splitMultipart(body, boundary) {
   return parts;
 }
 
-function decodeBody(node) {
+function decodeBody(node: MimeNode): Uint8Array {
   const { cte, body } = node;
   if (cte === 'base64') {
     const cleaned = body.replace(/[^A-Za-z0-9+/=]/g, '');
@@ -142,25 +176,25 @@ function decodeBody(node) {
   return bytes;
 }
 
-function qpDecode(input) {
-  const out = [];
+function qpDecode(input: string): Uint8Array {
+  const out: number[] = [];
   const cleaned = input.replace(/=\r?\n/g, '');
   for (let i = 0; i < cleaned.length; i++) {
     const c = cleaned[i];
     if (c === '=' && i + 2 < cleaned.length) {
-      const hex = cleaned.substr(i + 1, 2);
+      const hex = cleaned.substring(i + 1, i + 3);
       if (/^[0-9A-Fa-f]{2}$/.test(hex)) {
         out.push(parseInt(hex, 16));
         i += 2;
         continue;
       }
     }
-    out.push(cleaned.charCodeAt(i) & 0xff);
+    if (c) out.push(c.charCodeAt(0) & 0xff);
   }
   return new Uint8Array(out);
 }
 
-function decodeText(node) {
+function decodeText(node: MimeNode): string {
   const bytes = decodeBody(node);
   const charset = (node.params.charset || 'utf-8').toLowerCase();
   try {
@@ -170,7 +204,7 @@ function decodeText(node) {
   }
 }
 
-function filenameFor(node) {
+function filenameFor(node: MimeNode): string {
   const cd = node.headers['content-disposition'] || '';
   const m = cd.match(/filename\*?=(?:"([^"]+)"|([^;]+))/i);
   if (m) return (m[1] || m[2] || '').trim();
@@ -178,7 +212,7 @@ function filenameFor(node) {
   return 'attachment';
 }
 
-function collect(node, out) {
+function collect(node: MimeNode, out: OutputCollector): void {
   const { type, disposition } = node;
   const isAttachment = disposition.includes('attachment') ||
     (!type.startsWith('text/') && !type.startsWith('multipart/'));
@@ -206,17 +240,17 @@ function collect(node, out) {
   });
 }
 
-function bytesToDataUrl(bytes, type) {
+function bytesToDataUrl(bytes: Uint8Array, type: string): string {
   let binary = '';
   for (let i = 0; i < bytes.length; i++) binary += String.fromCharCode(bytes[i]);
   return `data:${type};base64,${btoa(binary)}`;
 }
 
 /** Helper pour décoder l'URL Data de la signature en texte clair pour OpenPGP */
-function dataUrlToText(dataUrl) {
+function dataUrlToText(dataUrl: string): string | null {
   try {
     const base64Str = dataUrl.split(',')[1];
-    return atob(base64Str);
+    return base64Str ? atob(base64Str) : null;
   } catch {
     return null;
   }

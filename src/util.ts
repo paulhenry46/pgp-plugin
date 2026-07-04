@@ -25,7 +25,7 @@ export function generateUUID() {
 }
 
 /** Lower-case hex string for any byte source (replaces Node's Buffer.toString('hex')). */
-export function toHex(source) {
+export function toHex(source: ArrayBuffer | ArrayBufferView): string {
   let bytes;
   if (source instanceof ArrayBuffer) {
     bytes = new Uint8Array(source);
@@ -39,16 +39,6 @@ export function toHex(source) {
   return out;
 }
 
-/** Constant-ish byte-array equality. */
-export function arraysEqual(a, b) {
-  if (a.length !== b.length) return false;
-  let diff = 0;
-  for (let i = 0; i < a.length; i++) diff |= a[i] ^ b[i];
-  return diff === 0;
-}
 
-/** Copy any ArrayBuffer-ish slice into a standalone ArrayBuffer. */
-export function toArrayBuffer(view) {
-  if (view instanceof ArrayBuffer) return view;
-  return view.buffer.slice(view.byteOffset, view.byteOffset + view.byteLength);
-}
+
+

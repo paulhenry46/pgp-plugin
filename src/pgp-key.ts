@@ -4,7 +4,7 @@
  */
 
 import * as openpgp from 'openpgp';
-import { generateUUID } from './util.js';
+import { generateUUID } from './util.ts';
 
 /**
  * Import a PGP Private Key block (ASCII Armored string).
@@ -13,16 +13,16 @@ import { generateUUID } from './util.js';
  * @param {string} currentKeyPassphrase - Le mot de passe actuel de la clé PGP (si elle est déjà chiffrée)
  * @param {string} storagePassphrase - Le mot de passe maître de l'extension pour sécuriser la clé au repos
  */
-export async function importPgpKey(pgpPrivateKeyArmored, currentKeyPassphrase, storagePassphrase) {
+export async function importPgpKey(pgpPrivateKeyArmored: string, currentKeyPassphrase: string, storagePassphrase: string) {
   let privateKey;
   try {
     privateKey = await openpgp.readPrivateKey({ armoredKey: pgpPrivateKeyArmored });
   } catch (e) {
-    throw new Error('Échec du parsing de la clé OpenPGP : ' + e.message);
+    throw new Error('Échec du parsing de la clé OpenPGP : ' + (e instanceof Error ? e.message : String(e)));
   }
 
   // Tente de déverrouiller la clé originale si elle est chiffrée
-  if (privateKey.isEncrypted()) {
+  if (!privateKey.isDecrypted()) {
     try {
       privateKey = await openpgp.decryptKey({
         privateKey,
@@ -36,6 +36,10 @@ export async function importPgpKey(pgpPrivateKeyArmored, currentKeyPassphrase, s
   // Extrait l'identifiant (User ID) et l'e-mail
   const primaryUser = await privateKey.getPrimaryUser();
   if (!primaryUser || !primaryUser.user) {
+    throw new Error("Aucun ID d'utilisateur valide trouvé dans cette clé PGP");
+  }
+
+  if (!primaryUser || !primaryUser.user || !primaryUser.user.userID) {
     throw new Error("Aucun ID d'utilisateur valide trouvé dans cette clé PGP");
   }
 
@@ -90,7 +94,7 @@ export async function importPgpKey(pgpPrivateKeyArmored, currentKeyPassphrase, s
  * @param {string} passphrase - Le mot de passe de l'extension saisi par l'utilisateur
  * @returns {Promise<{unlockedPrivateKey: openpgp.PrivateKey}>}
  */
-export async function unlockPrivateKey(record, passphrase) {
+export async function unlockPrivateKey(record: any, passphrase: string) {
   let encryptedKey;
   try {
     encryptedKey = await openpgp.readPrivateKey({ armoredKey: record.encryptedPrivateKey });
