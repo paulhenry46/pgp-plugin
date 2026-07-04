@@ -1,27 +1,57 @@
 /**
- * Minimal RFC 5322 / MIME parser used only for the inner content recovered
- * after decryption / signature-stripping. We need just enough to pull out the
- * best-alternative text/html body and any leaf attachments; the host
- * re-sanitizes returned HTML, so this never has to be a hardened renderer.
+ * Minimal RFC 5322 / MIME parser adapted for OpenPGP.
+ * Handles the inner structure recovered after decryption/verification, 
+ * extracts rich bodies, handles standalone PGP text blocks, and isolates PGP signatures.
  */
 
 const decoder = new TextDecoder('utf-8', { fatal: false });
 
-/** Parse raw inner MIME bytes into { html, text, attachments }. */
+/** * Parse raw inner MIME bytes into { html, text, attachments, pgpSignatureBlock }.
+ * Adds support for PGP Inline parsing and signatures isolation.
+ */
 export function parseMime(bytes) {
   const text = binaryString(bytes);
+  
+  // ── Cas Spécifique PGP Inline ──────────────────────────────────────
+  // Si le payload brut reçu contient directement un bloc PGP chiffré ou signé de manière textuelle
+  if (text.includes('-----BEGIN PGP MESSAGE-----') || text.includes('-----BEGIN PGP SIGNED MESSAGE-----')) {
+    return parsePgpInline(text);
+  }
+
   const node = parseEntity(text);
-  const out = { html: '', text: '', attachments: [] };
+  const out = { html: '', text: '', attachments: [], pgpSignatureBlock: null };
   collect(node, out);
-  // Fallback for non-MIME inner content (e.g. messages signed/encrypted by
-  // OpenSSL or older clients where the protected payload is raw text with no
-  // Content-Type). If structured parsing produced no renderable body, surface
-  // the decoded bytes as plain text so the message is never shown blank.
+  
+  // Nettoyage : Si une pièce jointe est la signature PGP détachée (PGP/MIME),
+  // on l'extrait de la liste pour la mettre dans un champ dédié de l'application.
+  const sigIndex = out.attachments.findIndex(att => 
+    att.type === 'application/pgp-signature' || att.name === 'signature.asc'
+  );
+  if (sigIndex !== -1) {
+    const sigAttachment = out.attachments[sigIndex];
+    // Reconvertit l'URL Data en chaîne texte pour l'API openpgp.verify()
+    out.pgpSignatureBlock = dataUrlToText(sigAttachment.dataUrl);
+    out.attachments.splice(sigIndex, 1); // Retire des pièces jointes affichées
+  }
+
+  // Fallback for non-MIME inner content
   if (!out.html && !out.text) {
     const raw = decoder.decode(bytes).trim();
     if (raw) out.text = raw;
   }
   return out;
+}
+
+/** Traite un bloc de texte brut contenant du PGP sans structure MIME complexe */
+function parsePgpInline(rawText) {
+  // Supprime les bruits d'en-têtes de transport HTTP/SMTP résiduels si présents
+  const cleanText = rawText.trim();
+  return {
+    html: '',
+    text: cleanText, // Le moteur crypto-engine l'interceptera pour affichage/traitement
+    attachments: [],
+    pgpSignatureBlock: cleanText.includes('-----BEGIN PGP SIGNED MESSAGE-----') ? cleanText : null
+  };
 }
 
 // Treat bytes as latin1 so byte boundaries survive; decode per-part by charset.
@@ -107,7 +137,6 @@ function decodeBody(node) {
   if (cte === 'quoted-printable') {
     return qpDecode(body);
   }
-  // 7bit / 8bit / binary — body is a latin1 binary string
   const bytes = new Uint8Array(body.length);
   for (let i = 0; i < body.length; i++) bytes[i] = body.charCodeAt(i) & 0xff;
   return bytes;
@@ -115,7 +144,7 @@ function decodeBody(node) {
 
 function qpDecode(input) {
   const out = [];
-  const cleaned = input.replace(/=\r?\n/g, ''); // soft line breaks
+  const cleaned = input.replace(/=\r?\n/g, '');
   for (let i = 0; i < cleaned.length; i++) {
     const c = cleaned[i];
     if (c === '=' && i + 2 < cleaned.length) {
@@ -155,12 +184,7 @@ function collect(node, out) {
     (!type.startsWith('text/') && !type.startsWith('multipart/'));
 
   if (type.startsWith('multipart/')) {
-    if (type === 'multipart/alternative') {
-      // Prefer the richest alternative; collect text+html, last wins per type.
-      for (const child of node.children) collect(child, out);
-    } else {
-      for (const child of node.children) collect(child, out);
-    }
+    for (const child of node.children) collect(child, out);
     return;
   }
 
@@ -173,7 +197,6 @@ function collect(node, out) {
     return;
   }
 
-  // Leaf attachment
   const bytes = decodeBody(node);
   out.attachments.push({
     name: filenameFor(node),
@@ -187,4 +210,14 @@ function bytesToDataUrl(bytes, type) {
   let binary = '';
   for (let i = 0; i < bytes.length; i++) binary += String.fromCharCode(bytes[i]);
   return `data:${type};base64,${btoa(binary)}`;
+}
+
+/** Helper pour décoder l'URL Data de la signature en texte clair pour OpenPGP */
+function dataUrlToText(dataUrl) {
+  try {
+    const base64Str = dataUrl.split(',')[1];
+    return atob(base64Str);
+  } catch {
+    return null;
+  }
 }

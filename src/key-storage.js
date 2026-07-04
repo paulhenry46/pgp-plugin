@@ -1,23 +1,13 @@
 /**
- * IndexedDB persistence for the S/MIME plugin.
- *
- * The privileged plugin runs in a same-origin iframe, so all of its iframes
- * (the hidden background instance that runs hooks + each visible slot) share
- * one IndexedDB. That's what lets the settings slot unlock a key and the
- * background send/receive hooks immediately use it.
+ * IndexedDB persistence for the OpenPGP plugin.
  *
  * Three stores:
- *  - key-records:   encrypted-at-rest private keys + certs (durable)
- *  - public-certs:  recipient/contact public certificates (durable)
- *  - session-keys:  unlocked, NON-EXTRACTABLE CryptoKeys (session-scoped;
- *                   wiped on activate() at app boot and on logout)
- *
- * CryptoKey objects are structured-cloneable, so IndexedDB can persist the
- * unlocked handles without ever exposing the raw key material — a
- * non-extractable key stays non-extractable when read back.
+ * - key-records:   encrypted-at-rest private keys + public keys (durable)
+ * - public-certs:  recipient/contact public PGP keys (durable)
+ * - session-keys:  unlocked OpenPGP private key objects (session-scoped)
  */
 
-const DB_NAME = 'smime-plugin-store';
+const DB_NAME = 'pgp-plugin-store';
 const DB_VERSION = 1;
 const KEY_RECORDS_STORE = 'key-records';
 const PUBLIC_CERTS_STORE = 'public-certs';
@@ -57,7 +47,7 @@ function txPromise(db, storeName, mode, fn) {
   });
 }
 
-// ── Key record CRUD ─────────────────────────────────────────────────
+// ── Private Key Records CRUD ────────────────────────────────────────
 
 export async function saveKeyRecord(record) {
   const db = await openDB();
@@ -81,7 +71,7 @@ export async function deleteKeyRecord(id) {
   await txPromise(db, KEY_RECORDS_STORE, 'readwrite', (s) => s.delete(id));
 }
 
-// ── Public cert CRUD ────────────────────────────────────────────────
+// ── Public Keys (Contacts) CRUD ─────────────────────────────────────
 
 export async function savePublicCert(cert) {
   const db = await openDB();
@@ -100,8 +90,7 @@ export async function deletePublicCert(id) {
   await txPromise(db, PUBLIC_CERTS_STORE, 'readwrite', (s) => s.delete(id));
 }
 
-// ── Session (unlocked) key CRUD ─────────────────────────────────────
-// Each entry: { id, signingKey, decryptionKey?, legacyDecryptionKey? }
+// ── Session (unlocked OpenPGP Key Objects) CRUD ─────────────────────
 
 export async function saveSessionKeys(entry) {
   const db = await openDB();

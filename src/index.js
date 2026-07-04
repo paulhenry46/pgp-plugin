@@ -1,18 +1,14 @@
 /**
- * S/MIME — privileged (same-origin) webmail plugin.
+ * OpenPGP — privileged (same-origin) webmail plugin.
  *
- * Replaces the former native S/MIME pipeline with a sandboxed plugin that
- * runs all cryptography locally (bundled pkijs/asn1js/webcrypto-liner):
+ * Replaces the former S/MIME pipeline with an OpenPGP pipeline that
+ * runs all cryptography locally (bundled openpgp / mimetext):
  *
- *   • onComposeSend   (intercept)  → build MIME, sign/encrypt, api.jmap.sendRaw
- *   • onRenderEmailBody (transform) → api.jmap.fetchBlob, decrypt/verify, replace body
- *   • composer-toolbar slot         → per-message Sign / Encrypt toggles
- *   • email-banner slot             → signature / encryption status
- *   • settings-section slot         → key import, unlock/lock, recipient certs
- *
- * Private keys are imported from PKCS#12, AES-GCM-wrapped under PBKDF2(600k),
- * and unlocked into NON-EXTRACTABLE WebCrypto keys held in a same-origin
- * IndexedDB session store shared between the background and slot iframes.
+ * • onComposeSend   (intercept)  → build MIME via mimetext, sign/encrypt, api.jmap.sendRaw
+ * • onRenderEmailBody (transform) → api.jmap.fetchBlob, decrypt/verify, replace body
+ * • composer-toolbar slot         → per-message Sign / Encrypt toggles
+ * • email-banner slot             → signature / encryption status
+ * • settings-section slot         → key import, unlock/lock, recipient public keys
  */
 
 const host = require('@plugin-host');
@@ -20,15 +16,15 @@ const React = require('react');
 const h = React.createElement;
 const { useState, useEffect, useCallback, useRef } = React;
 
-import { buildMimeMessage, wrapCmsAsSmimeMessage, base64Encode } from './mime-builder.js';
-import { smimeSign } from './smime-sign.js';
-import { smimeEncrypt } from './smime-encrypt.js';
-import { smimeVerify } from './smime-verify.js';
-import { smimeDecrypt, normalizeCmsBytes, SmimeKeyLockedError } from './smime-decrypt.js';
-import { detectSmime } from './smime-detect.js';
+// Importations des nouveaux modules OpenPGP & Mimetext
+import { buildMimeMessage, wrapAsPgpMimeEncrypted, wrapAsPgpMimeSigned } from './pgp-mime-builder.js';
+import { pgpSignDetached, pgpSignInline } from './pgp-sign.js';
+import { pgpEncrypt } from './pgp-encrypt.js';
+import { pgpVerify } from './pgp-verify.js';
+import { pgpDecrypt, normalizePgpMessage, PgpKeyLockedError } from './pgp-decrypt.js';
+import { detectPgp } from './pgp-detect.js'; // Remplacement de detectSmime
 import { parseMime } from './mime-parse.js';
-import { importPkcs12, unlockPrivateKey } from './pkcs12.js';
-import { parseCertificatePemOrDer, extractCertificateInfo } from './certificate-utils.js';
+import { extractKeyInfo } from './pgp-key-utils.js';
 import { generateUUID } from './util.js';
 import {
   saveKeyRecord, listKeyRecords, deleteKeyRecord,
@@ -64,14 +60,8 @@ function useAes128() {
 }
 
 // ─── Privileged-tier capability probe ─────────────────────────────────
-// S/MIME needs in-frame `crypto.subtle` + IndexedDB, which exist only in the
-// privileged (same-origin) tier. In the untrusted (null-origin) sandbox,
-// `indexedDB.open` throws "The operation is insecure" and `crypto.subtle` is
-// absent. We probe once and degrade with a clear message instead of letting a
-// raw IndexedDB error crash activate() (which would trip the circuit breaker).
-
 const NOT_PRIVILEGED_MSG =
-  'S/MIME could not start: it is running in the restricted (untrusted) plugin ' +
+  'OpenPGP could not start: it is running in the restricted (untrusted) plugin ' +
   'sandbox, where in-browser cryptography and key storage are unavailable. ' +
   'This plugin must be delivered as a signed, admin-approved bundle with ' +
   '"tier": "privileged" so it loads in the same-origin tier. Contact your ' +
@@ -84,7 +74,7 @@ async function isCapable() {
     if (typeof indexedDB === 'undefined' || !(crypto && crypto.subtle)) throw new Error('missing apis');
     await new Promise((resolve, reject) => {
       let req;
-      try { req = indexedDB.open('smime-capability-probe'); }
+      try { req = indexedDB.open('pgp-capability-probe'); }
       catch (e) { reject(e); return; }
       req.onsuccess = () => { try { req.result.close(); } catch { /* ignore */ } resolve(); };
       req.onerror = () => reject(req.error || new Error('indexedDB open failed'));
@@ -125,18 +115,6 @@ function bytesArrayBuffer(u8) {
   return u8.buffer.slice(u8.byteOffset, u8.byteOffset + u8.byteLength);
 }
 
-/** Wrap a CMS blob as a nested MIME entity (for sign-then-encrypt). */
-function cmsInnerEntity(cmsBytes, smimeType) {
-  const header = [
-    `Content-Type: application/pkcs7-mime; smime-type=${smimeType}; name="smime.p7m"`,
-    'Content-Transfer-Encoding: base64',
-    'Content-Disposition: attachment; filename="smime.p7m"',
-    '',
-  ].join('\r\n');
-  const b64 = base64Encode(bytesArrayBuffer(cmsBytes));
-  return new TextEncoder().encode(header + '\r\n' + b64 + '\r\n');
-}
-
 // ─── Key resolution ────────────────────────────────────────────────────
 
 async function signingKeyRecordForEmail(fromEmail) {
@@ -149,30 +127,29 @@ async function signingKeyRecordForEmail(fromEmail) {
   );
 }
 
-async function recipientCertsFor(emails) {
+async function recipientKeysFor(emails) {
   const certs = await listPublicCerts();
   const found = [];
   const missing = [];
   for (const email of emails) {
     const c = certs.find((pc) => pc.email.toLowerCase() === email.toLowerCase());
-    if (c) found.push(c.certificate);
+    if (c) found.push(c.publicKey); // Utilise .publicKey au lieu de .certificate
     else missing.push(email);
   }
   return { found, missing };
 }
 
-// Build decrypt key maps from the session store, across all key records.
+// Construit la carte des clés privées déverrouillées depuis le store de session.
 async function unlockedDecryptMaps() {
   const recs = await listKeyRecords();
   const unlockedKeys = new Map();
-  const legacyUnlockedKeys = new Map();
   for (const r of recs) {
     const s = await getSessionKeys(r.id);
     if (!s) continue;
+    // OpenPGP unifie la clé de déchiffrement (plus besoin de clé legacy)
     if (s.decryptionKey) unlockedKeys.set(r.id, s.decryptionKey);
-    if (s.legacyDecryptionKey) legacyUnlockedKeys.set(r.id, s.legacyDecryptionKey);
   }
-  return { keyRecords: recs, unlockedKeys, legacyUnlockedKeys };
+  return { keyRecords: recs, unlockedKeys };
 }
 
 // ─── Compose-send takeover ─────────────────────────────────────────────
@@ -186,7 +163,6 @@ async function resolveIntent(req) {
   let encrypt = pick(req.encrypt, req.smimeEncrypt, req.intent && req.intent.encrypt, req.smime && req.smime.encrypt);
 
   if (sign === undefined && encrypt === undefined) {
-    // Fall back to the composer-toolbar slot's stored intent, then prefs.
     const stored = (await host.storage.get(INTENT_KEY)) || {};
     const prefs = await getPrefs();
     sign = typeof stored.sign === 'boolean' ? stored.sign : prefs.defaultSign;
@@ -215,15 +191,15 @@ async function fetchAttachments(req) {
   return out;
 }
 
-async function onComposeSend(req) {
+export async function onComposeSend(req) {
   if (!req || typeof req !== 'object') return undefined;
 
   const { sign, encrypt } = await resolveIntent(req);
-  if (!sign && !encrypt) return undefined; // not our job — host sends normally
+  if (!sign && !encrypt) return undefined;
 
   if (!(await isCapable())) {
-    host.toast.error('Cannot sign/encrypt: S/MIME is not running in the privileged tier.');
-    return false; // refuse rather than send plaintext when sign/encrypt was requested
+    host.toast.error('Cannot sign/encrypt: OpenPGP is not running in the privileged tier.');
+    return false;
   }
 
   try {
@@ -240,13 +216,13 @@ async function onComposeSend(req) {
 
     const keyRecord = (sign || encrypt) ? await signingKeyRecordForEmail(from.email) : undefined;
     if ((sign || encrypt) && !keyRecord) {
-      host.toast.error(`No S/MIME key for ${from.email}. Import one in Settings → Plugins → S/MIME.`);
+      host.toast.error(`No OpenPGP key for ${from.email}. Import one in Settings → Plugins → OpenPGP.`);
       return false;
     }
 
-    // Build the inner MIME message from the draft.
+    // 1. Génération de la structure MIME claire (avec mimetext)
     const attachments = await fetchAttachments(req);
-    let payloadBytes = buildMimeMessage({
+    const clearMimeBytes = buildMimeMessage({
       from,
       to,
       cc,
@@ -258,63 +234,68 @@ async function onComposeSend(req) {
       attachments,
     });
 
-    // 1. Sign (opaque). If we'll also encrypt, nest the signed CMS as a MIME entity.
-    if (sign) {
-      const session = await getSessionKeys(keyRecord.id);
-      if (!session || !session.signingKey) {
-        host.toast.error('Your S/MIME key is locked. Unlock it in Settings → Plugins → S/MIME, then resend.');
-        return false;
-      }
-      const signedBlob = await smimeSign(
-        payloadBytes,
-        session.signingKey,
-        keyRecord.certificate,
-        keyRecord.certificateChain || [],
-      );
-      const signedBytes = await blobToBytes(signedBlob);
-      payloadBytes = encrypt ? cmsInnerEntity(signedBytes, 'signed-data') : signedBytes;
-    }
+    let finalEnvelopeBlob;
+    const session = await getSessionKeys(keyRecord.id);
 
-    // 2. Encrypt (envelope). Always includes the sender cert so Sent is readable.
-    let smimeType = sign ? 'signed-data' : null;
+    // 2. Traitement des combinaisons Cryptographiques (Sign, Encrypt, ou Sign+Encrypt)
     if (encrypt) {
-      const { found, missing } = await recipientCertsFor(allRecipientEmails);
+      // Résolution des clés destinataires
+      const { found, missing } = await recipientKeysFor(allRecipientEmails);
       if (missing.length > 0) {
-        host.toast.error(`Missing encryption certificate for: ${missing.join(', ')}`);
+        host.toast.error(`Missing encryption key for: ${missing.join(', ')}`);
         return false;
       }
-      const envBlob = await smimeEncrypt(payloadBytes, found, keyRecord.certificate, useAes128());
-      payloadBytes = await blobToBytes(envBlob);
-      smimeType = 'enveloped-data';
+
+      let payloadToEncrypt = clearMimeBytes;
+
+      // Si Signature + Chiffrement, on effectue un chiffrement de la structure signée (Sign-then-Encrypt)
+      if (sign) {
+        if (!session || !session.signingKey) {
+          host.toast.error('Your OpenPGP key is locked. Unlock it in Settings, then resend.');
+          return false;
+        }
+        // En PGP/MIME chiffré, on privilégie la signature Inline intégrée au bloc chiffré pour maximiser la compatibilité
+        payloadToEncrypt = await pgpSignInline(clearMimeBytes, session.signingKey);
+      }
+
+      // Chiffrement global
+      const encryptedBlob = await pgpEncrypt(payloadToEncrypt, found, keyRecord.publicKey, useAes128());
+      
+      // Encapsulation au standard strict PGP/MIME multipart/encrypted (RFC 3156)
+      finalEnvelopeBlob = wrapAsPgpMimeEncrypted(encryptedBlob, {
+        from, to, cc, subject: req.subject || '', inReplyTo: req.inReplyTo, references: req.references, messageId: req.messageId
+      });
+
+    } else if (sign) {
+      // Cas : Signature uniquement (multipart/signed détachée)
+      if (!session || !session.signingKey) {
+        host.toast.error('Your OpenPGP key is locked. Unlock it in Settings, then resend.');
+        return false;
+      }
+      const signatureBlob = await pgpSignDetached(clearMimeBytes, session.signingKey);
+      
+      finalEnvelopeBlob = wrapAsPgpMimeSigned(clearMimeBytes, signatureBlob, {
+        from, to, cc, subject: req.subject || '', inReplyTo: req.inReplyTo, references: req.references, messageId: req.messageId
+      });
     }
 
-    // 3. Wrap as RFC822 and submit raw.
-    const rfc822 = wrapCmsAsSmimeMessage(payloadBytes, {
-      from,
-      to,
-      cc,
-      subject: req.subject || '',
-      inReplyTo: req.inReplyTo,
-      references: req.references,
-      smimeType,
-    });
-    const rawBytes = await blobToBytes(rfc822);
-
+    // 3. Extraction et soumission brute au serveur JMAP
+    const rawBytes = await blobToBytes(finalEnvelopeBlob);
     const envelopeRecipients = [...new Set([...allRecipientEmails])];
     await host.jmap.sendRaw(bytesArrayBuffer(rawBytes), identityId, { envelopeRecipients });
 
     host.toast.success(
-      encrypt && sign ? 'Message signed, encrypted and sent'
-        : encrypt ? 'Message encrypted and sent'
-          : 'Message signed and sent',
+      encrypt && sign ? 'Message signed, encrypted and sent (PGP/MIME)'
+        : encrypt ? 'Message encrypted and sent (PGP/MIME)'
+          : 'Message signed and sent (PGP/MIME)',
     );
-    // Clear the per-message intent so the next compose starts from defaults.
+
     await host.storage.set(INTENT_KEY, {});
-    return false; // we handled the send
+    return false;
   } catch (err) {
     host.log.error('onComposeSend failed', err);
-    host.toast.error(`S/MIME send failed: ${err && err.message ? err.message : String(err)}`);
-    return false; // do NOT fall through to a plaintext send when sign/encrypt was requested
+    host.toast.error(`OpenPGP send failed: ${err && err.message ? err.message : String(err)}`);
+    return false;
   }
 }
 
@@ -322,7 +303,7 @@ async function onComposeSend(req) {
 
 async function maybeAutoImportSigner(status) {
   if (settings().autoImportSignerCerts === false) return;
-  const cert = status && status.signerCert;
+  const cert = status && status.signerCert; // On garde .signerCert pour la compatibilité sémantique de l'UI
   if (!cert || !status.signatureValid || !cert.email) return;
   try {
     const existing = (await listPublicCerts()).some((c) => c.fingerprint === cert.fingerprint);
@@ -330,7 +311,7 @@ async function maybeAutoImportSigner(status) {
       await savePublicCert({
         id: generateUUID(),
         email: cert.email,
-        certificate: cert.certificate,
+        publicKey: cert.publicKey,
         issuer: cert.issuer,
         subject: cert.subject,
         notBefore: cert.notBefore,
@@ -340,7 +321,7 @@ async function maybeAutoImportSigner(status) {
       });
     }
   } catch (err) {
-    host.log.warn('auto-import signer cert failed', err);
+    host.log.warn('auto-import signer key failed', err);
   }
 }
 
@@ -356,21 +337,22 @@ async function persistVerifyStatus(emailId, status) {
   try { await host.storage.set(VERIFY_PREFIX + emailId, status); } catch { /* ignore */ }
 }
 
-async function onRenderEmailBody(body, ctx) {
+export async function onRenderEmailBody(body, ctx) {
   if (!ctx) return undefined;
-  if (!(await isCapable())) return undefined; // can't decrypt/verify without the privileged tier
+  if (!(await isCapable())) return undefined;
 
-  const detection = detectSmime(ctx.contentType, ctx.bodyStructure, ctx.attachments);
+  // Détection OpenPGP (gère le PGP/MIME et le Inline)
+  const detection = detectPgp(ctx.contentType, ctx.bodyStructure, ctx.attachments);
   if (!detection.type) return undefined;
 
   if (!detection.supported) {
     const status = {
       isSigned: detection.type === 'detached-sig',
       isEncrypted: false,
-      unsupportedReason: `Unsupported S/MIME type (${detection.type})`,
+      unsupportedReason: `Unsupported OpenPGP layout (${detection.type})`,
     };
     await persistVerifyStatus(ctx.id, status);
-    return undefined; // let the host render the original body
+    return undefined;
   }
 
   const blobId = detection.blobId || ctx.blobId;
@@ -380,22 +362,23 @@ async function onRenderEmailBody(body, ctx) {
 
   try {
     const raw = await host.jmap.fetchBlob(blobId);
-    const der = normalizeCmsBytes(bytesArrayBuffer(raw instanceof Uint8Array ? raw : new Uint8Array(raw)));
+    const pgpMessageContent = normalizePgpMessage(bytesArrayBuffer(raw instanceof Uint8Array ? raw : new Uint8Array(raw)));
 
+    // ── Cas 1 : Traitement du Payload Chiffré ─────────────────────────
     if (detection.type === 'enveloped-data') {
-      const { keyRecords, unlockedKeys, legacyUnlockedKeys } = await unlockedDecryptMaps();
+      const { keyRecords, unlockedKeys } = await unlockedDecryptMaps();
       let result;
       try {
-        result = await smimeDecrypt({ cmsBytes: der, keyRecords, unlockedKeys, legacyUnlockedKeys });
+        result = await pgpDecrypt({ cmsBytes: pgpMessageContent, keyRecords, unlockedKeys });
       } catch (err) {
-        if (err instanceof SmimeKeyLockedError) {
+        if (err instanceof PgpKeyLockedError) {
           const status = { isEncrypted: true, decryptionSuccess: false, decryptionError: 'locked' };
           await persistVerifyStatus(ctx.id, status);
           return {
             ...body,
-            handledBy: 'smime',
-            html: statusNoticeHtml('🔒 This message is encrypted. Unlock your S/MIME key in Settings → Plugins → S/MIME to read it.', 'muted'),
-            text: 'This message is encrypted. Unlock your S/MIME key to read it.',
+            handledBy: 'openpgp',
+            html: statusNoticeHtml('🔒 This message is encrypted. Unlock your OpenPGP key in Settings to read it.', 'muted'),
+            text: 'This message is encrypted. Unlock your OpenPGP key to read it.',
             attachments: [],
             verification: status,
           };
@@ -404,37 +387,33 @@ async function onRenderEmailBody(body, ctx) {
         await persistVerifyStatus(ctx.id, status);
         return {
           ...body,
-          handledBy: 'smime',
-          html: statusNoticeHtml(`🔒 Could not decrypt this message: ${status.decryptionError}`, 'error'),
-          text: `Could not decrypt this message: ${status.decryptionError}`,
+          handledBy: 'openpgp',
+          html: statusNoticeHtml(`🔒 Could not decrypt this PGP message: ${status.decryptionError}`, 'error'),
+          text: `Could not decrypt this PGP message: ${status.decryptionError}`,
           attachments: [],
           verification: status,
         };
       }
 
-      // Decrypted inner content may itself be a signed CMS — either nested as a
-      // MIME entity (RFC 8551 sign-then-encrypt, the Outlook/Thunderbird form)
-      // or, more rarely, raw CMS DER. Detect both.
+      // Traitement des signatures combinées à l'intérieur du flux déchiffré
       let innerBytes = result.mimeBytes;
       const verification = { isEncrypted: true, decryptionSuccess: true };
-      const innerCt = innerContentType(innerBytes);
-      const innerDet = detectSmime(innerCt, null, null);
-      const looksSigned = innerDet.type === 'signed-data' || innerBytes[0] === 0x30;
-      if (looksSigned) {
-        try {
-          const signedDer = normalizeCmsBytes(bytesArrayBuffer(innerBytes));
-          const v = await smimeVerify(signedDer, fromEmail);
+      
+      // On teste si le contenu extrait est lui-même signé (Inline ou structure imbriquée)
+      try {
+        const v = await pgpVerify(innerBytes, fromEmail);
+        if (v.status && v.status.signatureValid) {
           innerBytes = v.mimeBytes;
           Object.assign(verification, v.status, { isEncrypted: true, decryptionSuccess: true });
           await maybeAutoImportSigner(v.status);
-        } catch { /* not actually signed; keep decrypted content as-is */ }
-      }
+        }
+      } catch { /* Contenu uniquement chiffré, pas de signature interne */ }
 
       const parsed = parseMime(innerBytes);
       await persistVerifyStatus(ctx.id, verification);
       return {
         ...body,
-        handledBy: 'smime',
+        handledBy: 'openpgp',
         html: parsed.html || '',
         text: parsed.text || '',
         attachments: parsed.attachments,
@@ -442,14 +421,20 @@ async function onRenderEmailBody(body, ctx) {
       };
     }
 
+    // ── Cas 2 : Traitement du Payload Signé uniquement ────────────────
     if (detection.type === 'signed-data') {
-      const v = await smimeVerify(der, fromEmail);
+      // Si signature détachée, le bloc signature est extrait de l'objet de détection des pièces jointes
+      const signatureBlock = detection.signatureBlobId ? await host.jmap.fetchBlob(detection.signatureBlobId) : null;
+      const signatureString = signatureBlock ? new TextDecoder().decode(await blobToBytes(signatureBlock)) : null;
+
+      const v = await pgpVerify(pgpMessageContent, fromEmail, signatureString);
       await maybeAutoImportSigner(v.status);
+      
       const parsed = parseMime(v.mimeBytes);
       await persistVerifyStatus(ctx.id, v.status);
       return {
         ...body,
-        handledBy: 'smime',
+        handledBy: 'openpgp',
         html: parsed.html || '',
         text: parsed.text || '',
         attachments: parsed.attachments,
@@ -458,19 +443,11 @@ async function onRenderEmailBody(body, ctx) {
     }
   } catch (err) {
     host.log.error('onRenderEmailBody failed', err);
-    return undefined; // fall back to host rendering on unexpected failure
+    return undefined;
   }
 
   return undefined;
 }
-
-// Sniff the Content-Type of an inner MIME entity (first headers only).
-function innerContentType(bytes) {
-  const head = new TextDecoder('utf-8', { fatal: false }).decode(bytes.subarray(0, 2048));
-  const m = head.match(/content-type:\s*([^\r\n]+)/i);
-  return m ? m[1].trim() : '';
-}
-
 // ─── UI: shared bits ───────────────────────────────────────────────────
 
 const card = {
@@ -490,7 +467,7 @@ const btn = {
   cursor: 'pointer',
 };
 const btnPrimary = { ...btn, background: 'var(--color-primary, #2563eb)', color: '#fff', border: '1px solid var(--color-primary, #2563eb)' };
-const input = {
+const inputStyle = { // Renommé pour éviter les collisions sémantiques avec l'élément <input>
   font: 'inherit',
   padding: '6px 8px',
   borderRadius: '6px',
@@ -502,10 +479,10 @@ const input = {
 };
 
 function fmtDate(iso) {
-  try { return new Date(iso).toLocaleDateString(); } catch { return iso; }
+  try { return iso ? new Date(iso).toLocaleDateString() : 'Never expires'; } catch { return iso; }
 }
 function isExpired(iso) {
-  try { return new Date(iso).getTime() < Date.now(); } catch { return false; }
+  try { return iso ? new Date(iso).getTime() < Date.now() : false; } catch { return false; }
 }
 
 // ─── UI: composer toolbar (Sign / Encrypt toggles) ─────────────────────
@@ -515,19 +492,23 @@ function ComposerToolbar() {
   const [ready, setReady] = useState(false);
 
   useEffect(() => {
+    let alive = true;
     (async () => {
       try {
-        if (!(await isCapable())) { setReady(false); return; }
+        if (!(await isCapable())) { if (alive) setReady(false); return; }
         const stored = (await host.storage.get(INTENT_KEY)) || {};
         const prefs = await getPrefs();
-        setIntent({
-          sign: typeof stored.sign === 'boolean' ? stored.sign : prefs.defaultSign,
-          encrypt: typeof stored.encrypt === 'boolean' ? stored.encrypt : prefs.defaultEncrypt,
-        });
+        if (alive) {
+          setIntent({
+            sign: typeof stored.sign === 'boolean' ? stored.sign : prefs.defaultSign,
+            encrypt: typeof stored.encrypt === 'boolean' ? stored.encrypt : prefs.defaultEncrypt,
+          });
+        }
         const recs = await listKeyRecords();
-        setReady(recs.length > 0);
-      } catch { setReady(false); }
+        if (alive) setReady(recs.length > 0);
+      } catch { if (alive) setReady(false); }
     })();
+    return () => { alive = false; };
   }, []);
 
   const update = useCallback(async (next) => {
@@ -546,7 +527,7 @@ function ComposerToolbar() {
 
   if (!ready) {
     return h('span', { style: { fontSize: '12px', color: 'var(--color-muted-foreground, #64748b)' } },
-      'S/MIME: import a key in Settings to sign/encrypt');
+      'OpenPGP: import a key in Settings to sign/encrypt');
   }
 
   return h('div', { style: { display: 'inline-flex', gap: '6px', alignItems: 'center' } },
@@ -578,12 +559,13 @@ function EmailBanner(props) {
       if (!email || !email.id) { setLoaded(true); return; }
       let s = await host.storage.get(VERIFY_PREFIX + email.id);
       if (!s) {
-        // No render-hook result yet — best-effort detect from headers/source.
+        // Détection à la volée via les en-têtes si le hook de rendu n'a pas encore fini
         const ct = email.headers && (email.headers['Content-Type'] || email.headers['content-type']);
-        const det = detectSmime(Array.isArray(ct) ? ct[0] : ct, undefined, undefined);
-        if (det.type === 'enveloped-data') s = { isEncrypted: true };
-        else if (det.type === 'signed-data') s = { isSigned: true };
-        else if (det.type === 'detached-sig') s = { isSigned: true, unsupportedReason: 'detached signature' };
+        const ctStr = Array.isArray(ct) ? ct[0] : ct;
+        
+        // Simulation minimale de détection basée sur les structures de détection OpenPGP
+        if (ctStr && ctStr.includes('multipart/encrypted')) s = { isEncrypted: true };
+        else if (ctStr && ctStr.includes('multipart/signed')) s = { isSigned: true };
       }
       if (alive) { setStatus(s || null); setLoaded(true); }
     })();
@@ -596,21 +578,23 @@ function EmailBanner(props) {
   const warnSelfSigned = settings().warnOnSelfSigned !== false;
 
   if (status.isEncrypted) {
-    if (status.decryptionSuccess) rows.push(['🔓', 'Decrypted', 'ok']);
-    else if (status.decryptionError === 'locked') rows.push(['🔒', 'Encrypted — unlock your key to read', 'warn']);
+    if (status.decryptionSuccess) rows.push(['🔓', 'Decrypted via OpenPGP', 'ok']);
+    else if (status.decryptionError === 'locked') rows.push(['🔒', 'Encrypted — unlock your PGP key to read', 'warn']);
     else if (status.decryptionError) rows.push(['🔒', `Encrypted — ${status.decryptionError}`, 'error']);
-    else rows.push(['🔒', 'Encrypted message', 'muted']);
+    else rows.push(['🔒', 'Encrypted OpenPGP message', 'muted']);
   }
+  
+  // Utilisation de .signerCert par compatibilité sémantique (contient les métadonnées de la clé publique de signature)
   if (status.isSigned || status.signerCert) {
     if (status.signatureValid) {
       const who = status.signerCert && status.signerCert.email ? ` by ${status.signerCert.email}` : '';
       const mismatch = status.signerEmailMatch === false ? ' ⚠ signer ≠ From' : '';
-      const ss = warnSelfSigned && status.selfSigned ? ' (self-signed)' : '';
-      rows.push(['🛡️', `Signature valid${who}${ss}${mismatch}`, status.signerEmailMatch === false ? 'warn' : 'ok']);
+      const ss = warnSelfSigned && status.selfSigned ? ' (self-signed key)' : '';
+      rows.push(['🛡️', `PGP Signature valid${who}${ss}${mismatch}`, status.signerEmailMatch === false ? 'warn' : 'ok']);
     } else if (status.signatureError) {
-      rows.push(['⚠️', `Signature invalid: ${status.signatureError}`, 'error']);
+      rows.push(['⚠️', `PGP Signature invalid: ${status.signatureError}`, 'error']);
     } else {
-      rows.push(['✍️', 'Signed message', 'muted']);
+      rows.push(['✍️', 'Signed OpenPGP message', 'muted']);
     }
   }
   if (status.unsupportedReason) rows.push(['ℹ️', status.unsupportedReason, 'muted']);
@@ -638,11 +622,11 @@ function EmailBanner(props) {
   );
 }
 
-// ─── UI: settings section (key & certificate management) ───────────────
+// ─── UI: settings section (key management) ─────────────────────────────
 
 function SettingsSection() {
   const [keys, setKeys] = useState([]);
-  const [certs, setCerts] = useState([]);
+  const [certs, setCerts] = useState([]); // Représente les clés publiques destinataires (anciennement certs)
   const [prefs, setPrefsState] = useState(DEFAULT_PREFS);
   const [unlocked, setUnlocked] = useState({}); // id -> bool
   const [busy, setBusy] = useState(false);
@@ -663,7 +647,7 @@ function SettingsSection() {
 
   if (!capable) {
     return h('div', { style: { ...card, borderColor: 'var(--color-destructive, #dc2626)', color: 'var(--color-destructive, #dc2626)', maxWidth: '720px' } },
-      h('div', { style: { fontWeight: 600, marginBottom: '6px' } }, 'S/MIME is not active'),
+      h('div', { style: { fontWeight: 600, marginBottom: '6px' } }, 'OpenPGP is not active'),
       h('div', { style: { fontSize: '13px', lineHeight: 1.5 } }, NOT_PRIVILEGED_MSG),
     );
   }
@@ -671,16 +655,21 @@ function SettingsSection() {
   async function importKeyFile() {
     const file = fileRef.current && fileRef.current.files && fileRef.current.files[0];
     if (!file) return;
-    const p12pass = window.prompt('Passphrase that protects the .p12/.pfx file:');
-    if (p12pass === null) return;
-    const storagePass = window.prompt('Choose a passphrase to protect this key in your browser:');
-    if (!storagePass) { host.toast.error('A storage passphrase is required'); return; }
+    
+    // En OpenPGP, on importe un bloc ASCII Armored (.asc, .key) de clé privée ou une clé exportée
+    const storagePass = window.prompt('Enter your OpenPGP passphrase to decrypt and import this private key:');
+    if (storagePass === null) return;
+    
     setBusy(true);
     try {
-      const buf = await file.arrayBuffer();
-      const { keyRecord } = await importPkcs12(buf, p12pass, storagePass);
+      const text = new TextDecoder().decode(await file.arrayBuffer());
+      
+      // Utilisation du nouveau hook d'importation OpenPGP (défini dans votre module d'import de clé)
+      const { importOpenPgpPrivateKey } = await import('./pgp-import.js');
+      const { keyRecord } = await importOpenPgpPrivateKey(text, storagePass);
+      
       await saveKeyRecord(keyRecord);
-      host.toast.success(`Imported S/MIME key for ${keyRecord.email || 'certificate'}`);
+      host.toast.success(`Imported OpenPGP key for ${keyRecord.email || 'identity'}`);
       if (fileRef.current) fileRef.current.value = '';
       await refresh();
     } catch (err) {
@@ -691,12 +680,15 @@ function SettingsSection() {
   }
 
   async function unlock(rec) {
-    const pass = window.prompt(`Passphrase for ${rec.email || 'this key'}:`);
+    const pass = window.prompt(`Passphrase to unlock the OpenPGP key for ${rec.email || 'this identity'}:`);
     if (!pass) return;
     setBusy(true);
     try {
-      const { signingKey, decryptionKey, legacyDecryptionKey } = await unlockPrivateKey(rec, pass);
-      await saveSessionKeys({ id: rec.id, signingKey, decryptionKey, legacyDecryptionKey });
+      const { unlockPrivateKey } = await import('./pgp-import.js');
+      const { signingKey, decryptionKey } = await unlockPrivateKey(rec, pass);
+      
+      // Stockage de la clé déverrouillée en mémoire de session IndexedDB
+      await saveSessionKeys({ id: rec.id, signingKey, decryptionKey });
       host.toast.success(`Unlocked ${rec.email || 'key'}`);
       await refresh();
     } catch (err) {
@@ -714,8 +706,8 @@ function SettingsSection() {
 
   async function removeKey(rec) {
     const ok = await host.ui.confirm({
-      title: 'Delete S/MIME key',
-      message: `Delete the private key and certificate for ${rec.email || 'this identity'}? You will no longer be able to decrypt mail encrypted to it.`,
+      title: 'Delete OpenPGP key',
+      message: `Delete the private key and public identity for ${rec.email || 'this identity'}? You will no longer be able to decrypt mail encrypted to it.`,
       danger: true,
       confirmLabel: 'Delete',
     });
@@ -731,16 +723,19 @@ function SettingsSection() {
     if (!file) return;
     setBusy(true);
     try {
-      const buf = await file.arrayBuffer();
-      const cert = parseCertificatePemOrDer(buf);
-      const der = cert.toSchema(true).toBER(false);
-      const info = await extractCertificateInfo(cert, der);
+      const text = new TextDecoder().decode(await file.arrayBuffer());
+      
+      const openpgp = await import('openpgp');
+      const readKey = await openpgp.readKey({ armoredKey: text });
+      const info = await extractKeyInfo(readKey);
+      
       const email = (info.emailAddresses[0] || '').toLowerCase();
-      if (!email) throw new Error('Certificate has no email address');
+      if (!email) throw new Error('Key has no valid email address associated');
+      
       await savePublicCert({
         id: generateUUID(),
         email,
-        certificate: der,
+        publicKey: text, // On stocke le bloc Armored textuel sous le champ publicKey
         issuer: info.issuer,
         subject: info.subject,
         notBefore: info.notBefore,
@@ -748,11 +743,11 @@ function SettingsSection() {
         fingerprint: info.fingerprint,
         source: 'manual',
       });
-      host.toast.success(`Imported certificate for ${email}`);
+      host.toast.success(`Imported public key for ${email}`);
       if (certFileRef.current) certFileRef.current.value = '';
       await refresh();
     } catch (err) {
-      host.toast.error(`Certificate import failed: ${err && err.message ? err.message : String(err)}`);
+      host.toast.error(`Key import failed: ${err && err.message ? err.message : String(err)}`);
     } finally {
       setBusy(false);
     }
@@ -771,12 +766,12 @@ function SettingsSection() {
 
   return h('div', { style: { display: 'flex', flexDirection: 'column', gap: '16px', maxWidth: '720px' } },
     h('div', null,
-      h('h3', { style: { margin: '0 0 4px', fontSize: '15px', fontWeight: 600 } }, 'Your keys'),
+      h('h3', { style: { margin: '0 0 4px', fontSize: '15px', fontWeight: 600 } }, 'Your OpenPGP keys'),
       h('p', { style: { margin: '0 0 8px', fontSize: '13px', color: 'var(--color-muted-foreground, #64748b)' } },
-        'Import a PKCS#12 (.p12/.pfx) file containing your certificate and private key. The key is encrypted in your browser and never leaves it.'),
+        'Import an armored OpenPGP private key (.asc/.key). The key remains encrypted locally in your browser sandbox.'),
       h('div', { style: { display: 'flex', gap: '8px', alignItems: 'center', marginBottom: '12px' } },
-        h('input', { ref: fileRef, type: 'file', accept: '.p12,.pfx', style: { fontSize: '13px' } }),
-        h('button', { type: 'button', style: btnPrimary, disabled: busy, onClick: importKeyFile }, 'Import key'),
+        h('input', { ref: fileRef, type: 'file', accept: '.asc,.key,.pgp', style: { fontSize: '13px' } }),
+        h('button', { type: 'button', style: btnPrimary, disabled: busy, onClick: importKeyFile }, 'Import private key'),
       ),
       keys.length === 0
         ? h('div', { style: { ...card, fontSize: '13px', color: 'var(--color-muted-foreground, #64748b)' } }, 'No keys imported yet.')
@@ -784,9 +779,9 @@ function SettingsSection() {
           keys.map((rec) => h('div', { key: rec.id, style: card },
             h('div', { style: { display: 'flex', justifyContent: 'space-between', gap: '8px', flexWrap: 'wrap' } },
               h('div', null,
-                h('div', { style: { fontWeight: 600, fontSize: '14px' } }, rec.email || rec.subject || 'Certificate'),
+                h('div', { style: { fontWeight: 600, fontSize: '14px' } }, rec.email || rec.subject || 'OpenPGP User'),
                 h('div', { style: { fontSize: '12px', color: 'var(--color-muted-foreground, #64748b)' } },
-                  `${rec.algorithm} · valid ${fmtDate(rec.notBefore)} – ${fmtDate(rec.notAfter)}${isExpired(rec.notAfter) ? ' · EXPIRED' : ''}`),
+                  `${rec.algorithm} · created ${fmtDate(rec.notBefore)}${rec.notAfter ? ` · expires ${fmtDate(rec.notAfter)}` : ' · no expiration'}${isExpired(rec.notAfter) ? ' · EXPIRED' : ''}`),
                 h('div', { style: { fontSize: '11px', fontFamily: 'monospace', color: 'var(--color-muted-foreground, #64748b)', wordBreak: 'break-all' } },
                   rec.fingerprint),
                 h('div', { style: { fontSize: '11px', color: 'var(--color-muted-foreground, #64748b)' } },
@@ -808,15 +803,15 @@ function SettingsSection() {
     ),
 
     h('div', null,
-      h('h3', { style: { margin: '0 0 4px', fontSize: '15px', fontWeight: 600 } }, 'Recipient certificates'),
+      h('h3', { style: { margin: '0 0 4px', fontSize: '15px', fontWeight: 600 } }, 'Recipient public keys'),
       h('p', { style: { margin: '0 0 8px', fontSize: '13px', color: 'var(--color-muted-foreground, #64748b)' } },
-        'Public certificates (PEM/DER) of people you want to send encrypted mail to. Signer certificates from validly signed mail are saved automatically.'),
+        'Public keys (ASCII Armored) of contacts you send encrypted mail to. Signer keys extracted from valid signed messages are verified and captured automatically.'),
       h('div', { style: { display: 'flex', gap: '8px', alignItems: 'center', marginBottom: '12px' } },
-        h('input', { ref: certFileRef, type: 'file', accept: '.pem,.crt,.cer,.der', style: { fontSize: '13px' } }),
-        h('button', { type: 'button', style: btn, disabled: busy, onClick: importCertFile }, 'Import certificate'),
+        h('input', { ref: certFileRef, type: 'file', accept: '.asc,.key,.pub', style: { fontSize: '13px' } }),
+        h('button', { type: 'button', style: btn, disabled: busy, onClick: importCertFile }, 'Import public key'),
       ),
       certs.length === 0
-        ? h('div', { style: { ...card, fontSize: '13px', color: 'var(--color-muted-foreground, #64748b)' } }, 'No recipient certificates.')
+        ? h('div', { style: { ...card, fontSize: '13px', color: 'var(--color-muted-foreground, #64748b)' } }, 'No recipient public keys collected.')
         : h('div', { style: { display: 'flex', flexDirection: 'column', gap: '6px' } },
           certs.map((c) => h('div', { key: c.id, style: { ...card, display: 'flex', justifyContent: 'space-between', gap: '8px', alignItems: 'center' } },
             h('div', null,
@@ -836,7 +831,7 @@ function SettingsSection() {
         'Sign new messages by default'),
       h('label', { style: { display: 'flex', gap: '8px', alignItems: 'center', fontSize: '13px' } },
         h('input', { type: 'checkbox', checked: !!prefs.defaultEncrypt, onChange: (e) => setPref('defaultEncrypt', e.target.checked) }),
-        'Encrypt new messages by default (when all recipients have certificates)'),
+        'Encrypt new messages by default (when all recipients have verified keys)'),
     ),
   );
 }
@@ -846,7 +841,6 @@ function SettingsSection() {
 export const hooks = {
   onComposeSend,
   onRenderEmailBody,
-  // Wipe unlocked keys from the shared session store on sign-out / account switch.
   async onAfterLogout() {
     if (settings().lockOnLogout === false) return;
     try { await clearSessionKeys(); } catch (err) { host.log.warn('clearSessionKeys failed', err); }
@@ -864,17 +858,13 @@ export const slots = {
 };
 
 export async function activate(api) {
-  // Bail out gracefully if we're not in the privileged (same-origin) tier — do
-  // NOT throw, or the circuit breaker disables the plugin after a raw IDB error.
   if (!(await isCapable())) {
     api.log.error(NOT_PRIVILEGED_MSG);
-    try { api.toast.error('S/MIME needs the privileged tier — see plugin logs / contact your admin.'); } catch { /* ignore */ }
+    try { api.toast.error('OpenPGP needs the privileged tier — see plugin logs.'); } catch { /* ignore */ }
     return;
   }
-  // Enforce session scope for unlocked keys: wipe any left over from a prior
-  // app session at boot (mirrors the native "in-memory, cleared on reload").
-  try { await clearSessionKeys(); } catch (err) { api.log.warn('S/MIME: clearSessionKeys failed', err); }
+  try { await clearSessionKeys(); } catch (err) { api.log.warn('OpenPGP: clearSessionKeys failed', err); }
   let keyCount = 0;
-  try { keyCount = (await listKeyRecords()).length; } catch (err) { api.log.warn('S/MIME: listKeyRecords failed', err); }
-  api.log.info(`S/MIME plugin activated (${keyCount} key${keyCount === 1 ? '' : 's'} imported)`);
+  try { keyCount = (await listKeyRecords()).length; } catch (err) { api.log.warn('OpenPGP: listKeyRecords failed', err); }
+  api.log.info(`OpenPGP plugin activated (${keyCount} key${keyCount === 1 ? '' : 's'} available)`);
 }
