@@ -13766,7 +13766,7 @@ async function pgpSignDetached(mimeBytes, unlockedPrivateKey) {
 
 // src/pgp-encrypt.ts
 init_openpgp_min();
-async function pgpEncrypt(mimeBytes, recipientPublicKeysArmored, senderPublicKeyArmored, useAes1282, signingKey) {
+async function pgpEncrypt(mimeBytes, recipientPublicKeysArmored, senderPublicKeyArmored, signingKey) {
   const allKeyStrings = deduplicateKeys([...recipientPublicKeysArmored, senderPublicKeyArmored]);
   if (allKeyStrings.length === 0) {
     throw new Error("Aucune clé publique de destinataire ou d’expéditeur fournie.");
@@ -13784,7 +13784,7 @@ async function pgpEncrypt(mimeBytes, recipientPublicKeysArmored, senderPublicKey
     throw new Error("Échec du parsing de toutes les clés publiques fournies.");
   }
   const message = await ao({ binary: mimeBytes });
-  const algorithm = useAes1282 ? R.symmetric.aes128 : R.symmetric.aes256;
+  const algorithm = R.symmetric.aes256;
   const encryptOptions = {
     message,
     encryptionKeys,
@@ -14603,26 +14603,10 @@ async function encryptPrivateKeyData(pkcs8Bytes, passphrase) {
 // src/index.tsx
 var h3 = import_react.default.createElement;
 var { useState, useEffect, useCallback, useRef } = import_react.default;
-var PREFS_KEY = "prefs.v1";
 var INTENT_KEY = "composeIntent.v1";
 var VERIFY_PREFIX = "verify:";
-var DEFAULT_PREFS = { defaultSign: false, defaultEncrypt: false };
-async function getPrefs() {
-  try {
-    const p2 = await import_plugin_host.default.storage.get(PREFS_KEY);
-    return { ...DEFAULT_PREFS, ...p2 || {} };
-  } catch {
-    return { ...DEFAULT_PREFS };
-  }
-}
-async function setPrefs(next) {
-  await import_plugin_host.default.storage.set(PREFS_KEY, next);
-}
 function settings() {
   return import_plugin_host.default.plugin?.settings || {};
-}
-function useAes128() {
-  return settings().encryptionStrength === "aes-128";
 }
 var NOT_PRIVILEGED_MSG = 'OpenPGP could not start: it is running in the restricted (untrusted) plugin sandbox, where in-browser cryptography and key storage are unavailable. This plugin must be delivered as a signed, admin-approved bundle with "tier": "privileged" so it loads in the same-origin tier. Contact your administrator.';
 var _capable = null;
@@ -14719,9 +14703,8 @@ async function resolveIntent(req) {
   let encrypt = pick(req.encrypt, req.smimeEncrypt, req.intent && req.intent.encrypt, req.smime && req.smime.encrypt);
   if (sign === void 0 && encrypt === void 0) {
     const stored = await import_plugin_host.default.storage.get(INTENT_KEY) || {};
-    const prefs = await getPrefs();
-    sign = typeof stored.sign === "boolean" ? stored.sign : prefs.defaultSign;
-    encrypt = typeof stored.encrypt === "boolean" ? stored.encrypt : prefs.defaultEncrypt;
+    sign = typeof stored.sign === "boolean" ? stored.sign : settings().defaultSign;
+    encrypt = typeof stored.encrypt === "boolean" ? stored.encrypt : settings().defaultEncrypt;
   }
   return { sign: !!sign, encrypt: !!encrypt };
 }
@@ -14806,7 +14789,6 @@ async function onComposeSend(req) {
         clearMimeBytes,
         found,
         currentKeyRecord.publicKey,
-        useAes128(),
         signingKeyForEncrypt
       );
       finalEnvelopeBlob = wrapAsPgpMimeEncrypted(encryptedBlob, {
@@ -15030,11 +15012,10 @@ function ComposerToolbar() {
           return;
         }
         const stored = await import_plugin_host.default.storage.get(INTENT_KEY) || {};
-        const prefs = await getPrefs();
         if (alive) {
           setIntent({
-            sign: typeof stored.sign === "boolean" ? stored.sign : !!prefs.defaultSign,
-            encrypt: typeof stored.encrypt === "boolean" ? stored.encrypt : !!prefs.defaultEncrypt
+            sign: typeof stored.sign === "boolean" ? stored.sign : !!settings().defaultSign,
+            encrypt: typeof stored.encrypt === "boolean" ? stored.encrypt : !!settings().defaultEncrypt
           });
         }
         const recs = await listKeyRecords();
@@ -15116,7 +15097,6 @@ function EmailBanner(props) {
   }, [email && email.id]);
   if (!loaded || !status) return null;
   const rows = [];
-  const warnSelfSigned = settings().warnOnSelfSigned !== false;
   if (status.isEncrypted) {
     if (status.decryptionSuccess) rows.push(["🔓", "Decrypted via OpenPGP", "ok"]);
     else if (status.decryptionError === "locked") rows.push(["🔒", "Encrypted — unlock your PGP key to read", "warn"]);
@@ -15127,7 +15107,7 @@ function EmailBanner(props) {
     if (status.signatureValid) {
       const who = status.signerCert && status.signerCert.email ? ` by ${status.signerCert.email}` : "";
       const mismatch = status.signerEmailMatch === false ? " ⚠ signer ≠ From" : "";
-      const ss2 = warnSelfSigned && status.selfSigned ? " (self-signed key)" : "";
+      const ss2 = status.selfSigned ? " (self-signed key)" : "";
       rows.push(["🛡️", `PGP Signature valid${who}${ss2}${mismatch}`, status.signerEmailMatch === false ? "warn" : "ok"]);
     } else if (status.signatureError) {
       rows.push(["⚠️", `PGP Signature invalid: ${status.signatureError}`, "error"]);
@@ -15162,7 +15142,6 @@ function EmailBanner(props) {
 function SettingsSection() {
   const [keys, setKeys] = useState([]);
   const [certs, setCerts] = useState([]);
-  const [prefs, setPrefsState] = useState(DEFAULT_PREFS);
   const [unlocked, setUnlocked] = useState({});
   const [busy, setBusy] = useState(false);
   const [capable, setCapable] = useState(true);
@@ -15177,10 +15156,9 @@ function SettingsSection() {
       setCapable(false);
       return;
     }
-    const [k2, c3, p2] = await Promise.all([listKeyRecords(), listPublicCerts(), getPrefs()]);
+    const [k2, c3] = await Promise.all([listKeyRecords(), listPublicCerts()]);
     setKeys(k2);
     setCerts(c3);
-    setPrefsState(p2);
     const u2 = {};
     for (const rec of k2) {
       u2[rec.id] = !!await getSessionKeys(rec.id);
@@ -15308,11 +15286,6 @@ function SettingsSection() {
   async function removeCert(c3) {
     await deletePublicCert(c3.id);
     await refresh();
-  }
-  async function setPref(key, value) {
-    const next = { ...prefs, [key]: value };
-    setPrefsState(next);
-    await setPrefs(next);
   }
   return h3(
     "div",
@@ -15456,23 +15429,6 @@ function SettingsSection() {
           ),
           h3("button", { type: "button", style: { ...btn, color: "var(--color-destructive, #dc2626)" }, onClick: () => removeCert(c3) }, "Remove")
         ))
-      )
-    ),
-    h3(
-      "div",
-      null,
-      h3("h3", { style: { margin: "0 0 8px", fontSize: "15px", fontWeight: 600 } }, "Defaults for new messages"),
-      h3(
-        "label",
-        { style: { display: "flex", gap: "8px", alignItems: "center", fontSize: "13px", marginBottom: "6px" } },
-        h3("input", { type: "checkbox", checked: !!prefs.defaultSign, onChange: (e2) => setPref("defaultSign", e2.target.checked) }),
-        "Sign new messages by default"
-      ),
-      h3(
-        "label",
-        { style: { display: "flex", gap: "8px", alignItems: "center", fontSize: "13px" } },
-        h3("input", { type: "checkbox", checked: !!prefs.defaultEncrypt, onChange: (e2) => setPref("defaultEncrypt", e2.target.checked) }),
-        "Encrypt new messages by default (when all recipients have verified keys)"
       )
     )
   );

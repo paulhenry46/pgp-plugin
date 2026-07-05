@@ -1,9 +1,9 @@
 {
   "id": "smime",
-  "name": "S/MIME",
+  "name": "OPENPGP",
   "version": "1.0.1",
-  "author": "Bulwark Mail Community",
-  "description": "End-to-end S/MIME for webmail: sign and encrypt outgoing messages, and automatically verify signatures and decrypt incoming CMS (PKCS#7) mail. Private keys are imported from a PKCS#12 (.p12/.pfx) file, encrypted at rest with a passphrase, and unlocked into non-extractable WebCrypto keys that never leave your browser. Runs in the privileged (same-origin) plugin tier so all cryptography happens locally with bundled pkijs/asn1js.",
+  "author": "Paulhenry Saux",
+  "description": "End-to-end OpenPGP for webmail: sign and encrypt outgoing messages, and automatically verify signatures and decrypt incoming PGP mail. Private keys are encrypted at rest with a passphrase, and unlocked into non-extractable WebCrypto keys that never leave your browser. Runs in the privileged (same-origin) plugin tier so all cryptography happens locally.",
   "type": "ui-extension",
   "tier": "privileged",
   "permissions": [
@@ -35,6 +35,18 @@
       "label": "Lock keys on logout",
       "description": "Wipe all unlocked private keys from memory when you sign out or switch accounts. Leave on unless you have a specific reason not to.",
       "default": true
+    },
+    "defaultEncrypt": {
+      "type": "boolean",
+      "label": "Default encrypt",
+      "description": "Whether to encrypt messages by default.",
+      "default": true
+    },
+    "defaultSign": {
+      "type": "boolean",
+      "label": "Default sign",
+      "description": "Whether to sign messages by default.",
+      "default": true
     }
   },
   "locales": {
@@ -46,7 +58,7 @@
       "banner.locked": "Encrypted — unlock your key to read",
       "toolbar.sign": "Sign",
       "toolbar.encrypt": "Encrypt",
-      "settings.title": "S/MIME keys & certificates"
+      "settings.title": "OpenPGP keys"
     }
   }
 }

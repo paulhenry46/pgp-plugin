@@ -1,9 +1,8 @@
 # S/MIME plugin
 
-End-to-end S/MIME (CMS / PKCS#7) for Bulwark Webmail, implemented as a
+End-to-end PGP for Bulwark Webmail, implemented as a
 **privileged** (same-origin) plugin. All cryptography runs locally in the
-browser using a bundled `pkijs` / `asn1js` / `webcrypto-liner` stack — no key
-material ever leaves the device.
+browser — no key material ever leaves the device.
 
 ## What it does
 
