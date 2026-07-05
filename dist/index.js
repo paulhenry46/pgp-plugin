@@ -13609,15 +13609,22 @@ async function clearArmoredPrivateKeyToPrivateKey(armoredKey) {
 var CRLF = "\r\n";
 function buildMimeMessage(input) {
   const msg = c();
+  console.log("build mime 1");
   msg.setSender(input.from);
+  console.log("build mime 11");
   msg.setTo(input.to);
+  console.log("build mime 111");
   if (input.cc?.length) msg.setCc(input.cc);
+  console.log("build mime 00");
   msg.setSubject(input.subject);
+  console.log("build mime 2222");
   if (input.inReplyTo) msg.setHeader("In-Reply-To", input.inReplyTo);
   if (input.references?.length) msg.setHeader("References", input.references.join(" "));
+  console.log("build mime 2");
   if (input.messageId) {
     msg.setHeader("Message-ID", input.messageId);
   }
+  console.log("build mime 3");
   if (input.textBody) msg.addMessage({ contentType: "text/plain", data: input.textBody });
   if (input.htmlBody) msg.addMessage({ contentType: "text/html", data: input.htmlBody });
   if (input.attachments?.length) {
@@ -13632,7 +13639,9 @@ function wrapAsPgpMimeEncrypted(pgpEncryptedBlob, input) {
   const boundary = generateBoundary();
   const lines = [];
   lines.push(formatHeader("From", formatAddress(input.from)));
-  lines.push(formatHeader("To", input.to.map(formatAddress).join(", ")));
+  const toEntries = Array.isArray(input.to) ? input.to : [input.to];
+  const cleanTo = toEntries.map((t2) => typeof t2 === "string" ? t2 : t2.email || t2.addr || "").filter(Boolean);
+  lines.push(formatHeader("To", cleanTo.join(", ")));
   if (input.cc?.length) lines.push(formatHeader("Cc", input.cc.map(formatAddress).join(", ")));
   lines.push(formatHeader("Subject", encodeHeaderValue(input.subject)));
   lines.push(formatHeader("Date", formatDate(input.date ?? /* @__PURE__ */ new Date())));
@@ -13652,16 +13661,19 @@ function wrapAsPgpMimeEncrypted(pgpEncryptedBlob, input) {
   lines.push('Content-Type: application/octet-stream; name="encrypted.asc"');
   lines.push("Content-Description: OpenPGP encrypted message");
   lines.push('Content-Disposition: inline; filename="encrypted.asc"');
+  lines.push("Content-Transfer-Encoding: 7bit");
   lines.push("");
-  const headerBytes = new TextEncoder().encode(lines.join(CRLF));
+  const headerBytes = new TextEncoder().encode(lines.join(CRLF) + CRLF);
   const closingBytes = new TextEncoder().encode(`${CRLF}--${boundary}--${CRLF}`);
-  return new Blob([headerBytes, pgpEncryptedBlob, closingBytes], { type: "message/rfc822" });
+  return new Blob([headerBytes, pgpEncryptedBlob, closingBytes], { type: "application/octet-stream" });
 }
 function wrapAsPgpMimeSigned(clearMimeBytes, pgpSignatureBlob, input) {
   const boundary = generateBoundary();
   const lines = [];
   lines.push(formatHeader("From", formatAddress(input.from)));
-  lines.push(formatHeader("To", input.to.map(formatAddress).join(", ")));
+  const toEntries = Array.isArray(input.to) ? input.to : [input.to];
+  const cleanTo = toEntries.map((t2) => t2).filter(Boolean);
+  lines.push(formatHeader("To", cleanTo.join(", ")));
   if (input.cc?.length) lines.push(formatHeader("Cc", input.cc.map(formatAddress).join(", ")));
   lines.push(formatHeader("Subject", encodeHeaderValue(input.subject)));
   lines.push(formatHeader("Date", formatDate(input.date ?? /* @__PURE__ */ new Date())));
@@ -13682,7 +13694,8 @@ function wrapAsPgpMimeSigned(clearMimeBytes, pgpSignatureBlob, input) {
   middleLines.push("");
   const middleBytes = new TextEncoder().encode(middleLines.join(CRLF));
   const closingBytes = new TextEncoder().encode(`${CRLF}--${boundary}--${CRLF}`);
-  return new Blob([initialHeaderBytes, clearMimeBytes, middleBytes, pgpSignatureBlob, closingBytes], { type: "message/rfc822" });
+  const blob = new Blob([initialHeaderBytes, clearMimeBytes, middleBytes, pgpSignatureBlob, closingBytes], { type: "message/rfc822" });
+  return blob;
 }
 function generateBoundary() {
   const bytes = crypto.getRandomValues(new Uint8Array(16));
@@ -13692,9 +13705,9 @@ function generateBoundary() {
 function formatAddress(addr) {
   if (addr.name) {
     const escaped = addr.name.replace(/\\/g, "\\\\").replace(/"/g, '\\"');
-    return `"${escaped}" <${addr.email}>`;
+    return `"${escaped}" <${addr.addr}>`;
   }
-  return addr.email;
+  return addr.addr;
 }
 function formatHeader(name, value) {
   const full = `${name}: ${value}`;
@@ -13798,6 +13811,8 @@ async function pgpEncrypt(mimeBytes, recipientPublicKeysArmored, senderPublicKey
       preferredSymmetricAlgorithm: algorithm
     }
   });
+  console.log("message:", message);
+  console.log("message encrypted:", encryptedArmored);
   return new Blob([encryptedArmored], { type: "application/pgp-encrypted; charset=utf-8" });
 }
 function deduplicateKeys(keys) {
@@ -14667,8 +14682,16 @@ function addrList(arr) {
   if (!arr) return [];
   return (Array.isArray(arr) ? arr : [arr]).map(parseAddr).filter((a3) => a3.email);
 }
-function emailsOf(arr) {
-  return addrList(arr).map((a3) => a3.email.toLowerCase());
+function emailsOf(input) {
+  const items = Array.isArray(input) ? input : [input];
+  return items.map((item) => {
+    if (item && typeof item === "object" && item.email) {
+      return String(item.email);
+    }
+    const str = String(item || "").trim();
+    const match = str.match(/<([^>]+)>/);
+    return match ? match[1] : str;
+  }).map((email) => email.trim().toLowerCase()).filter((email) => email && email.includes("@"));
 }
 async function blobToBytes(blob) {
   return new Uint8Array(await blob.arrayBuffer());
@@ -14737,6 +14760,7 @@ async function fetchAttachments(req) {
   return out;
 }
 async function onComposeSend(req) {
+  console.log(req);
   if (!req || typeof req !== "object") return void 0;
   const { sign, encrypt } = await resolveIntent(req);
   if (!sign && !encrypt) return void 0;
@@ -14747,25 +14771,24 @@ async function onComposeSend(req) {
   try {
     const identityId = req.identityId || req.identity || "";
     if (!identityId) throw new Error("No sending identity available");
-    const from = parseAddr(req.fromEmail || req.from || (addrList(req.from)[0] || {}).email || "");
-    if (!from.email) throw new Error("Could not determine sender address");
-    const to2 = addrList(req.to);
-    const cc2 = addrList(req.cc);
-    const bcc = addrList(req.bcc);
+    const from = { addr: req.fromEmail, name: req.fromName };
+    if (!from.addr) throw new Error("Could not determine sender address");
     const allRecipientEmails = [...emailsOf(req.to), ...emailsOf(req.cc), ...emailsOf(req.bcc)];
+    console.log("from:", req.fromEmail, from.addr);
     let keyRecord = void 0;
     if (sign || encrypt) {
-      keyRecord = await signingKeyRecordForEmail(from.email);
+      keyRecord = await signingKeyRecordForEmail(from.addr);
     }
     if ((sign || encrypt) && !keyRecord) {
-      import_plugin_host.default.toast.error(`No OpenPGP key for ${from.email}. Import one in Settings → Plugins → OpenPGP.`);
+      import_plugin_host.default.toast.error(`No OpenPGP key for ${from.addr}. Import one in Settings → Plugins → OpenPGP.`);
       return false;
     }
     const attachments = await fetchAttachments(req);
+    console.log("build Message");
     const clearMimeBytes = buildMimeMessage({
       from,
-      to: to2,
-      cc: cc2,
+      to: req.to,
+      cc: req.cc,
       subject: req.subject || "",
       textBody: req.textBody || req.text || "",
       htmlBody: req.htmlBody || req.html || "",
@@ -14774,16 +14797,20 @@ async function onComposeSend(req) {
       attachments
     });
     let finalEnvelopeBlob;
+    console.log("builded Message");
     const currentKeyRecord = keyRecord;
     const session = await getSessionKeys(currentKeyRecord.id);
     if (encrypt) {
+      console.log("encrypt Message");
       const { found, missing } = await recipientKeysFor(allRecipientEmails);
+      console.log("RecipientKey :", found);
       if (missing.length > 0) {
         import_plugin_host.default.toast.error(`Missing encryption key for: ${missing.join(", ")}`);
         return false;
       }
       let payloadToEncrypt = clearMimeBytes;
       if (sign) {
+        console.log("sign and encrypt Message");
         if (!session || !session.signingKey) {
           import_plugin_host.default.toast.error("Your OpenPGP key is locked. Unlock it in Settings, then resend.");
           return false;
@@ -14791,16 +14818,19 @@ async function onComposeSend(req) {
         payloadToEncrypt = await pgpSignInline(clearMimeBytes, await clearArmoredPrivateKeyToPrivateKey(session.signingKey));
       }
       const encryptedBlob = await pgpEncrypt(payloadToEncrypt, found, currentKeyRecord.publicKey, useAes128());
+      console.log();
       finalEnvelopeBlob = wrapAsPgpMimeEncrypted(encryptedBlob, {
         from,
-        to: to2,
-        cc: cc2,
+        to: req.to,
+        cc: req.cc,
         subject: req.subject || "",
         inReplyTo: req.inReplyTo,
         references: req.references,
         messageId: req.messageId
       });
+      console.log("finalEnvelopeBlob", finalEnvelopeBlob);
     } else if (sign) {
+      console.log("sign Message");
       if (!session || !session.signingKey) {
         import_plugin_host.default.toast.error("Your OpenPGP key is locked. Unlock it in Settings, then resend.");
         return false;
@@ -14809,8 +14839,8 @@ async function onComposeSend(req) {
       const clearMimeBytesBlob = new Blob([clearMimeBytes.slice().buffer], { type: "application/octet-stream" });
       finalEnvelopeBlob = wrapAsPgpMimeSigned(clearMimeBytesBlob, signatureBlob, {
         from,
-        to: to2,
-        cc: cc2,
+        to: req.to,
+        cc: req.cc,
         subject: req.subject || "",
         inReplyTo: req.inReplyTo,
         references: req.references,
@@ -14820,9 +14850,14 @@ async function onComposeSend(req) {
     if (!finalEnvelopeBlob) {
       throw new Error("Cryptographic processing failed to generate an output envelope.");
     }
+    console.log("finalEnvelopeBlob", finalEnvelopeBlob);
+    const final_text = await finalEnvelopeBlob.text();
+    console.log("final text: ", final_text);
     const rawBytes = await blobToBytes(finalEnvelopeBlob);
     const envelopeRecipients = [.../* @__PURE__ */ new Set([...allRecipientEmails])];
-    await import_plugin_host.default.jmap.sendRaw(bytesArrayBuffer(rawBytes), identityId, { envelopeRecipients });
+    console.log("Sending raw bytes to JMAP:", rawBytes, "Recipients:", envelopeRecipients);
+    const result = await import_plugin_host.default.jmap.sendRaw(bytesArrayBuffer(rawBytes), identityId, { envelopeRecipients });
+    console.log(result);
     import_plugin_host.default.toast.success(
       encrypt && sign ? "Message signed, encrypted and sent (PGP/MIME)" : encrypt ? "Message encrypted and sent (PGP/MIME)" : "Message signed and sent (PGP/MIME)"
     );
@@ -14978,7 +15013,6 @@ var btn = {
   color: "var(--color-foreground, #0f172a)",
   cursor: "pointer"
 };
-var btnPrimary = { ...btn, background: "var(--color-primary, #2563eb)", color: "#fff", border: "1px solid var(--color-primary, #2563eb)" };
 function fmtDate(iso) {
   try {
     return iso ? new Date(iso).toLocaleDateString() : "Never expires";
@@ -15116,7 +15150,7 @@ function EmailBanner(props) {
   const toneColor = (tone) => tone === "ok" ? "var(--color-success, #16a34a)" : tone === "error" ? "var(--color-destructive, #dc2626)" : tone === "warn" ? "var(--color-warning, #d97706)" : "var(--color-muted-foreground, #64748b)";
   return h3(
     "div",
-    { style: { display: "flex", flexDirection: "column", gap: "4px", margin: "4px 0" } },
+    { style: { display: "flex", flexDirection: "column", gap: "4px" } },
     rows.map(
       ([icon, text, tone], i3) => h3("div", {
         key: i3,
@@ -15365,7 +15399,7 @@ function SettingsSection() {
             h3(
               "div",
               { style: { display: "flex", gap: "6px", alignItems: "flex-start" } },
-              unlocked[rec.id] ? h3("button", { type: "button", style: btn, disabled: busy, onClick: () => lock(rec) }, "🔓 Lock") : h3("button", { type: "button", style: btnPrimary, disabled: busy, onClick: () => initiateUnlock(rec) }, "🔒 Unlock"),
+              unlocked[rec.id] ? h3("button", { type: "button", style: btn, disabled: busy, onClick: () => lock(rec) }, "🔓 Lock") : h3("button", { type: "button", style: btn, disabled: busy, onClick: () => initiateUnlock(rec) }, "🔒 Unlock"),
               h3("button", {
                 type: "button",
                 style: { ...btn, color: "var(--color-destructive, #dc2626)", borderColor: "var(--color-destructive, #dc2626)" },
@@ -15393,7 +15427,7 @@ function SettingsSection() {
                 maxWidth: "240px"
               }
             }),
-            h3("button", { type: "button", style: btnPrimary, disabled: busy, onClick: () => confirmUnlock(rec) }, "OK"),
+            h3("button", { type: "button", style: btn, disabled: busy, onClick: () => confirmUnlock(rec) }, "OK"),
             h3("button", { type: "button", style: btn, disabled: busy, onClick: () => setUnlockingKeyId(null) }, "Cancel")
           )
         ))

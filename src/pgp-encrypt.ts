@@ -62,6 +62,8 @@ export async function pgpEncrypt(
     }
   });
 
+  console.log('message:',message)
+  console.log('message encrypted:',encryptedArmored)
   // 6. Retourne un Blob texte au format standard OpenPGP chiffré
   // OpenPGP.js renvoie par défaut une String au format armored si l'option format n'est pas modifiée.
   return new Blob([encryptedArmored as string], { type: 'application/pgp-encrypted; charset=utf-8' });

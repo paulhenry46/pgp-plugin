@@ -103,8 +103,26 @@ function addrList(arr: any) {
   if (!arr) return [];
   return (Array.isArray(arr) ? arr : [arr]).map(parseAddr).filter((a) => a.email);
 }
-function emailsOf(arr: any) {
-  return addrList(arr).map((a) => a.email.toLowerCase());
+function emailsOf(input: any): string[] {
+  // 1. Normaliser l'entrée sous forme de tableau et filtrer les valeurs vides
+  const items = Array.isArray(input) ? input : [input];
+
+  return items
+    .map((item) => {
+      // 2. Si c'est un objet (ex: { email: '...' })
+      if (item && typeof item === 'object' && item.email) {
+        return String(item.email);
+      }
+      
+      // 3. Si c'est une chaîne, extraire ce qui est entre < > ou prendre la chaîne brute
+      const str = String(item || '').trim();
+      const match = str.match(/<([^>]+)>/);
+      
+      return match ? match[1] : str;
+    })
+    // 4. Nettoyer le résultat, passer en minuscules et filtrer les e-mails invalides/vides
+    .map((email) => email.trim().toLowerCase())
+    .filter((email) => email && email.includes('@'));
 }
 
 // ─── Blob/bytes helpers ────────────────────────────────────────────────
@@ -222,6 +240,7 @@ export interface ComposeRequest {
 }
 
 export async function onComposeSend(req: ComposeRequest): Promise<boolean | undefined> {
+  console.log(req);
   if (!req || typeof req !== 'object') return undefined;
 
   const { sign, encrypt } = await resolveIntent(req);
@@ -237,31 +256,30 @@ export async function onComposeSend(req: ComposeRequest): Promise<boolean | unde
 
   if (!identityId) throw new Error('No sending identity available');
 
-    const from = parseAddr(req.fromEmail || req.from || (addrList(req.from)[0] || {}).email || '');
-    if (!from.email) throw new Error('Could not determine sender address');
+    const from = {addr: req.fromEmail, name: req.fromName};
 
-    const to = addrList(req.to);
-    const cc = addrList(req.cc);
-    const bcc = addrList(req.bcc);
+    if (!from.addr) throw new Error('Could not determine sender address');
     const allRecipientEmails = [...emailsOf(req.to), ...emailsOf(req.cc), ...emailsOf(req.bcc)];
 
     // Initialisation typée
+    console.log('from:' ,req.fromEmail, from.addr);
     let keyRecord: KeyRecord | undefined = undefined;
     if (sign || encrypt) {
-      keyRecord = await signingKeyRecordForEmail(from.email);
+      keyRecord = await signingKeyRecordForEmail(from.addr);
     }
 
     if ((sign || encrypt) && !keyRecord) {
-      host.toast.error(`No OpenPGP key for ${from.email}. Import one in Settings → Plugins → OpenPGP.`);
+      host.toast.error(`No OpenPGP key for ${from.addr}. Import one in Settings → Plugins → OpenPGP.`);
       return false;
     }
 
     // 1. Génération de la structure MIME claire (avec mimetext)
     const attachments = await fetchAttachments(req);
+    console.log('build Message')
     const clearMimeBytes = buildMimeMessage({
       from,
-      to,
-      cc,
+      to :req.to,
+      cc: req.cc,
       subject: req.subject || '',
       textBody: req.textBody || req.text || '',
       htmlBody: req.htmlBody || req.html || '',
@@ -271,7 +289,7 @@ export async function onComposeSend(req: ComposeRequest): Promise<boolean | unde
     });
 
     let finalEnvelopeBlob: Blob | undefined;
-    
+    console.log('builded Message')
     // À ce stade, TypeScript sait que si (sign || encrypt) est vrai, keyRecord est défini
     // Mais pour satisfaire l'analyseur strict, on ajoute une assertion ou une garde locale
     const currentKeyRecord = keyRecord as KeyRecord;
@@ -279,8 +297,10 @@ export async function onComposeSend(req: ComposeRequest): Promise<boolean | unde
 
     // 2. Traitement des combinaisons Cryptographiques (Sign, Encrypt, ou Sign+Encrypt)
     if (encrypt) {
+      console.log('encrypt Message')
       // Résolution des clés destinataires
       const { found, missing } = await recipientKeysFor(allRecipientEmails);
+      console.log('RecipientKey :', found);
       if (missing.length > 0) {
         host.toast.error(`Missing encryption key for: ${missing.join(', ')}`);
         return false;
@@ -290,6 +310,7 @@ export async function onComposeSend(req: ComposeRequest): Promise<boolean | unde
 
       // Si Signature + Chiffrement, on effectue un chiffrement de la structure signée (Sign-then-Encrypt)
       if (sign) {
+        console.log('sign and encrypt Message')
         if (!session || !session.signingKey) {
           host.toast.error('Your OpenPGP key is locked. Unlock it in Settings, then resend.');
           return false;
@@ -300,13 +321,14 @@ export async function onComposeSend(req: ComposeRequest): Promise<boolean | unde
 
       // Chiffrement global
       const encryptedBlob = await pgpEncrypt(payloadToEncrypt, found, currentKeyRecord.publicKey, useAes128());
-      
+      console.log()
       // Encapsulation au standard strict PGP/MIME multipart/encrypted (RFC 3156)
-      finalEnvelopeBlob = wrapAsPgpMimeEncrypted(encryptedBlob, {
-        from, to, cc, subject: req.subject || '', inReplyTo: req.inReplyTo, references: req.references, messageId: req.messageId
+      finalEnvelopeBlob =  wrapAsPgpMimeEncrypted(encryptedBlob, {
+        from, to: req.to, cc: req.cc, subject: req.subject || '', inReplyTo: req.inReplyTo, references: req.references, messageId: req.messageId
       });
-
+      console.log('finalEnvelopeBlob', finalEnvelopeBlob);
     } else if (sign) {
+      console.log('sign Message')
       // Cas : Signature uniquement (multipart/signed détachée)
       if (!session || !session.signingKey) {
         host.toast.error('Your OpenPGP key is locked. Unlock it in Settings, then resend.');
@@ -318,18 +340,23 @@ export async function onComposeSend(req: ComposeRequest): Promise<boolean | unde
     const clearMimeBytesBlob = new Blob([clearMimeBytes.slice().buffer], { type: 'application/octet-stream' });
 
       finalEnvelopeBlob = wrapAsPgpMimeSigned(clearMimeBytesBlob, signatureBlob, {
-        from, to, cc, subject: req.subject || '', inReplyTo: req.inReplyTo, references: req.references, messageId: req.messageId
+        from, to: req.to, cc: req.cc, subject: req.subject || '', inReplyTo: req.inReplyTo, references: req.references, messageId: req.messageId
       });
     }
 
     if (!finalEnvelopeBlob) {
       throw new Error('Cryptographic processing failed to generate an output envelope.');
     }
-
+    console.log('finalEnvelopeBlob', finalEnvelopeBlob);
     // 3. Extraction et soumission brute au serveur JMAP
+    const final_text = await finalEnvelopeBlob.text();
+    console.log('final text: ', final_text);
     const rawBytes = await blobToBytes(finalEnvelopeBlob);
     const envelopeRecipients = [...new Set([...allRecipientEmails])];
-    await host.jmap.sendRaw(bytesArrayBuffer(rawBytes), identityId, { envelopeRecipients });
+    console.log('Sending raw bytes to JMAP:', rawBytes, 'Recipients:', envelopeRecipients);
+
+   const result = await host.jmap.sendRaw(bytesArrayBuffer(rawBytes), identityId, { envelopeRecipients });
+   console.log(result);
 
     host.toast.success(
       encrypt && sign ? 'Message signed, encrypted and sent (PGP/MIME)'
@@ -512,17 +539,6 @@ const btn = {
   background: 'var(--color-muted, #f1f5f9)',
   color: 'var(--color-foreground, #0f172a)',
   cursor: 'pointer',
-};
-const btnPrimary = { ...btn, background: 'var(--color-primary, #2563eb)', color: '#fff', border: '1px solid var(--color-primary, #2563eb)' };
-const inputStyle = { // Renommé pour éviter les collisions sémantiques avec l'élément <input>
-  font: 'inherit',
-  padding: '6px 8px',
-  borderRadius: '6px',
-  border: '1px solid var(--color-input, #cbd5e1)',
-  background: 'var(--color-background, #fff)',
-  color: 'var(--color-foreground, #0f172a)',
-  width: '100%',
-  boxSizing: 'border-box',
 };
 
 function fmtDate(iso: string | number | Date | null) {
@@ -714,7 +730,7 @@ function EmailBanner(props: EmailProps) {
       : tone === 'warn' ? 'var(--color-warning, #d97706)'
         : 'var(--color-muted-foreground, #64748b)';
 
-  return h('div', { style: { display: 'flex', flexDirection: 'column', gap: '4px', margin: '4px 0' } },
+  return h('div', { style: { display: 'flex', flexDirection: 'column', gap: '4px' } },
     rows.map(([icon, text, tone], i) =>
       h('div', {
         key: i,
@@ -965,7 +981,7 @@ function SettingsSection() {
             h('div', { style: { display: 'flex', gap: '6px', alignItems: 'flex-start' } },
               unlocked[rec.id]
                 ? h('button', { type: 'button', style: btn, disabled: busy, onClick: () => lock(rec) }, '🔓 Lock')
-                : h('button', { type: 'button', style: btnPrimary, disabled: busy, onClick: () => initiateUnlock(rec) }, '🔒 Unlock'),
+                : h('button', { type: 'button', style: btn, disabled: busy, onClick: () => initiateUnlock(rec) }, '🔒 Unlock'),
               h('button', {
                 type: 'button',
                 style: { ...btn, color: 'var(--color-destructive, #dc2626)', borderColor: 'var(--color-destructive, #dc2626)' },
@@ -991,7 +1007,7 @@ function SettingsSection() {
                 maxWidth: '240px'
               }
             }),
-            h('button', { type: 'button', style: btnPrimary, disabled: busy, onClick: () => confirmUnlock(rec) }, 'OK'),
+            h('button', { type: 'button', style: btn, disabled: busy, onClick: () => confirmUnlock(rec) }, 'OK'),
             h('button', { type: 'button', style: btn, disabled: busy, onClick: () => setUnlockingKeyId(null) }, 'Cancel')
           )
         )),
