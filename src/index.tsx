@@ -24,7 +24,7 @@ import { pgpDecrypt, normalizePgpMessage, PgpKeyLockedError } from './pgp-decryp
 import { detectPgp } from './pgp-detect.ts'; // Remplacement de detectSmime
 import { parseMime } from './mime-parse.ts';
 import { extractKeyInfo } from './pgp-key-utils.ts';
-import { generateUUID } from './util.ts';
+import { clearArmoredPrivateKeyToPrivateKey, generateUUID } from './util.ts';
 import {
   saveKeyRecord, listKeyRecords, deleteKeyRecord,
   savePublicCert, listPublicCerts, deletePublicCert,
@@ -295,7 +295,7 @@ export async function onComposeSend(req: ComposeRequest): Promise<boolean | unde
           return false;
         }
         // En PGP/MIME chiffré, on privilégie la signature Inline intégrée au bloc chiffré pour maximiser la compatibilité
-        payloadToEncrypt = await pgpSignInline(clearMimeBytes, session.signingKey);
+        payloadToEncrypt = await pgpSignInline(clearMimeBytes, await clearArmoredPrivateKeyToPrivateKey(session.signingKey));
       }
 
       // Chiffrement global
@@ -312,7 +312,7 @@ export async function onComposeSend(req: ComposeRequest): Promise<boolean | unde
         host.toast.error('Your OpenPGP key is locked. Unlock it in Settings, then resend.');
         return false;
       }
-      const signatureBlob = await pgpSignDetached(clearMimeBytes, session.signingKey);
+      const signatureBlob = await pgpSignDetached(clearMimeBytes, await clearArmoredPrivateKeyToPrivateKey(session.signingKey));
       
     //convert clearMimeBytes to blob
     const clearMimeBytesBlob = new Blob([clearMimeBytes.slice().buffer], { type: 'application/octet-stream' });

@@ -23,9 +23,9 @@ interface EncryptedData {
 }
 
 interface UnlockResult {
-  unlockedPrivateKey: openpgp.PrivateKey;
-  signingKey: openpgp.PrivateKey;
-  decryptionKey: openpgp.PrivateKey;
+  unlockedPrivateKey: string;
+  signingKey: string;
+  decryptionKey: string;
 }
 
 // ── Main Core Functions ───────────────────────────────────────────────
@@ -145,9 +145,9 @@ export async function unlockPrivateKey(record: KeyRecord, passphrase: string): P
   }
 
   return {
-    unlockedPrivateKey: openPgpPrivateKey,
-    signingKey: openPgpPrivateKey,
-    decryptionKey: openPgpPrivateKey
+    unlockedPrivateKey: openPgpPrivateKey.armor(),
+    signingKey: openPgpPrivateKey.armor(),
+    decryptionKey: openPgpPrivateKey.armor()
   };
 }
 

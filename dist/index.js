@@ -13588,6 +13588,7 @@ function c() {
 }
 
 // src/util.ts
+init_openpgp_min();
 function generateUUID() {
   if (typeof crypto !== "undefined" && typeof crypto.randomUUID === "function") {
     return crypto.randomUUID();
@@ -13597,6 +13598,11 @@ function generateUUID() {
   bytes[8] = bytes[8] & 63 | 128;
   const hex = Array.from(bytes, (b2) => b2.toString(16).padStart(2, "0"));
   return hex.slice(0, 4).join("") + "-" + hex.slice(4, 6).join("") + "-" + hex.slice(6, 8).join("") + "-" + hex.slice(8, 10).join("") + "-" + hex.slice(10, 16).join("");
+}
+async function clearArmoredPrivateKeyToPrivateKey(armoredKey) {
+  return await Za({
+    armoredKey
+  });
 }
 
 // src/pgp-mime-builder.ts
@@ -14039,9 +14045,14 @@ async function pgpDecrypt(input) {
     const unlockedPrivateKey = unlockedKeys.get(keyRecord.id);
     if (!unlockedPrivateKey) continue;
     try {
+      console.log(`Tentative de déchiffrement avec la clé ${keyRecord.id}...`);
+      console.log("Clé déverrouillée :", unlockedPrivateKey);
+      console.log("Type Clé déverrouillée :", typeof unlockedPrivateKey);
+      console.log("Message PGP :", parsedMessage);
+      console.log("Message PGP (armored) :", armoredMessage);
       const { data: decryptedBytes } = await wo({
         message: parsedMessage,
-        decryptionKeys: unlockedPrivateKey,
+        decryptionKeys: await clearArmoredPrivateKeyToPrivateKey(unlockedPrivateKey),
         format: "binary"
         // Pour récupérer un Uint8Array exploitable par src/mime-parse.js
       });
@@ -14565,9 +14576,9 @@ async function unlockPrivateKey(record, passphrase) {
     }
   }
   return {
-    unlockedPrivateKey: openPgpPrivateKey,
-    signingKey: openPgpPrivateKey,
-    decryptionKey: openPgpPrivateKey
+    unlockedPrivateKey: openPgpPrivateKey.armor(),
+    signingKey: openPgpPrivateKey.armor(),
+    decryptionKey: openPgpPrivateKey.armor()
   };
 }
 async function deriveWrappingKey(passphrase, salt, iterations) {
@@ -14777,7 +14788,7 @@ async function onComposeSend(req) {
           import_plugin_host.default.toast.error("Your OpenPGP key is locked. Unlock it in Settings, then resend.");
           return false;
         }
-        payloadToEncrypt = await pgpSignInline(clearMimeBytes, session.signingKey);
+        payloadToEncrypt = await pgpSignInline(clearMimeBytes, await clearArmoredPrivateKeyToPrivateKey(session.signingKey));
       }
       const encryptedBlob = await pgpEncrypt(payloadToEncrypt, found, currentKeyRecord.publicKey, useAes128());
       finalEnvelopeBlob = wrapAsPgpMimeEncrypted(encryptedBlob, {
@@ -14794,7 +14805,7 @@ async function onComposeSend(req) {
         import_plugin_host.default.toast.error("Your OpenPGP key is locked. Unlock it in Settings, then resend.");
         return false;
       }
-      const signatureBlob = await pgpSignDetached(clearMimeBytes, session.signingKey);
+      const signatureBlob = await pgpSignDetached(clearMimeBytes, await clearArmoredPrivateKeyToPrivateKey(session.signingKey));
       const clearMimeBytesBlob = new Blob([clearMimeBytes.slice().buffer], { type: "application/octet-stream" });
       finalEnvelopeBlob = wrapAsPgpMimeSigned(clearMimeBytesBlob, signatureBlob, {
         from,

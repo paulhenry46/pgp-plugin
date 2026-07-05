@@ -1,3 +1,4 @@
+import * as openpgp from 'openpgp';
 // Small browser helpers shared across the S/MIME plugin modules.
 // (The native app pulled these from @/lib/utils; the sandbox has no host
 // imports, so we provide local, dependency-free equivalents.)
@@ -40,5 +41,8 @@ export function toHex(source: ArrayBuffer | ArrayBufferView): string {
 }
 
 
-
-
+export async function clearArmoredPrivateKeyToPrivateKey(armoredKey: string): Promise<openpgp.PrivateKey> {
+ return  await openpgp.readKey({ 
+        armoredKey: armoredKey 
+      }) as openpgp.PrivateKey;
+}

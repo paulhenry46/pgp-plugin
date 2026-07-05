@@ -54,9 +54,9 @@ export interface PublicCert {
 
 export interface SessionKeysEntry {
   id: string; 
-  unlockedPrivateKey: openpgp.PrivateKey; // Précisé au lieu de any
-  signingKey: openpgp.PrivateKey;         // Précisé au lieu de any   
-  decryptionKey: openpgp.PrivateKey;      // Précisé au lieu de any
+  unlockedPrivateKey: string; // Stocke la clé principale déchiffrée au format ASCII Armored
+  signingKey: string;          // Stocke la sous-clé de signature au format ASCII Armored
+  decryptionKey: string;       // Stocke la sous-clé de déchiffrement au format ASCII Armored
 }
 
 // ── Moteur de Base de Données ───────────────────────────────────────

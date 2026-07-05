@@ -5,6 +5,7 @@
 
 import * as openpgp from 'openpgp';
 import {KeyRecord} from './key-storage.ts'; // Importez l'interface KeyRecord générée à l'étape précédente
+import { clearArmoredPrivateKeyToPrivateKey } from './util.ts';
 
 export class PgpKeyLockedError extends Error {
   public keyRecordId: string;
@@ -23,14 +24,14 @@ export class PgpKeyLockedError extends Error {
  * @param {Map} input.unlockedKeys - Map (keyRecordId -> openpgp.PrivateKey déverrouillée) pour cette session.
  * @returns {Promise<{ mimeBytes: Uint8Array, keyRecordId: string }>}
  */
-export async function pgpDecrypt(input: { cmsBytes: Uint8Array, keyRecords: KeyRecord[], unlockedKeys: Map<string, openpgp.PrivateKey> }) {
+export async function pgpDecrypt(input: { cmsBytes: Uint8Array, keyRecords: KeyRecord[], unlockedKeys: Map<string, string> }) {
   const { cmsBytes, keyRecords, unlockedKeys } = input;
 
   // 1. Normalisation de la charge utile d'entrée
   console.log('[plugin:smime] : CmsBytes :' ,cmsBytes);
   const armoredMessage = normalizePgpMessage(cmsBytes);
   console.log('[plugin:smime] : armored :' ,armoredMessage);
-  let parsedMessage;
+  let parsedMessage: openpgp.Message<string>;
   try {
     parsedMessage = await openpgp.readMessage({ armoredMessage });
   } catch (e) {
@@ -49,9 +50,14 @@ export async function pgpDecrypt(input: { cmsBytes: Uint8Array, keyRecords: KeyR
     if (!unlockedPrivateKey) continue; // La clé correspond mais est verrouillée (absente de la Map de session)
 
     try {
+      console.log(`Tentative de déchiffrement avec la clé ${keyRecord.id}...`); 
+      console.log('Clé déverrouillée :', unlockedPrivateKey);
+      console.log('Type Clé déverrouillée :', typeof unlockedPrivateKey);
+      console.log('Message PGP :', parsedMessage);
+      console.log('Message PGP (armored) :', armoredMessage);
       const { data: decryptedBytes } = await openpgp.decrypt({
         message: parsedMessage,
-        decryptionKeys: unlockedPrivateKey,
+        decryptionKeys: await clearArmoredPrivateKeyToPrivateKey(unlockedPrivateKey),
         format: 'binary' // Pour récupérer un Uint8Array exploitable par src/mime-parse.js
       });
 
