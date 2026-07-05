@@ -57,9 +57,7 @@ async function setPrefs(next: any) {
 function settings() {
   return host.plugin?.settings || {};
 }
-function useAes128() {
-  return settings().encryptionStrength === 'aes-128';
-}
+
 
 // ─── Privileged-tier capability probe ─────────────────────────────────
 const NOT_PRIVILEGED_MSG =
@@ -319,8 +317,7 @@ export async function onComposeSend(req: ComposeRequest): Promise<boolean | unde
       const encryptedBlob = await pgpEncrypt(
         clearMimeBytes, 
         found, 
-        currentKeyRecord.publicKey, 
-        useAes128(), 
+        currentKeyRecord.publicKey,
         signingKeyForEncrypt
       );
       
@@ -700,7 +697,6 @@ function EmailBanner(props: EmailProps) {
 
   // Typage strict du tableau de lignes
   const rows: BannerRow[] = [];
-  const warnSelfSigned = settings().warnOnSelfSigned !== false;
 
   if (status.isEncrypted) {
     if (status.decryptionSuccess) rows.push(['🔓', 'Decrypted via OpenPGP', 'ok']);
@@ -713,7 +709,7 @@ function EmailBanner(props: EmailProps) {
     if (status.signatureValid) {
       const who = status.signerCert && status.signerCert.email ? ` by ${status.signerCert.email}` : '';
       const mismatch = status.signerEmailMatch === false ? ' ⚠ signer ≠ From' : '';
-      const ss = warnSelfSigned && status.selfSigned ? ' (self-signed key)' : '';
+      const ss =  status.selfSigned ? ' (self-signed key)' : '';
       rows.push(['🛡️', `PGP Signature valid${who}${ss}${mismatch}`, status.signerEmailMatch === false ? 'warn' : 'ok']);
     } else if (status.signatureError) {
       rows.push(['⚠️', `PGP Signature invalid: ${status.signatureError}`, 'error']);

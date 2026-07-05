@@ -18,8 +18,7 @@ import * as openpgp from 'openpgp';
 export async function pgpEncrypt(
   mimeBytes: Uint8Array, 
   recipientPublicKeysArmored: string[], 
-  senderPublicKeyArmored: string, 
-  useAes128: boolean,
+  senderPublicKeyArmored: string,
   signingKey?: openpgp.PrivateKey // <-- Paramètre optionnel ajouté pour la signature combinée
 ): Promise<Blob> {
   
@@ -50,7 +49,7 @@ export async function pgpEncrypt(
   const message = await openpgp.createMessage({ binary: mimeBytes });
 
   // 4. Configuration de l'algorithme symétrique (Session Key)
-  const algorithm = useAes128 ? openpgp.enums.symmetric.aes128 : openpgp.enums.symmetric.aes256;
+  const algorithm = openpgp.enums.symmetric.aes256;
 
   // 5. Configuration dynamique de l'objet d'options pour openpgp.encrypt
   const encryptOptions: any = {
