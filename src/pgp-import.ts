@@ -37,26 +37,43 @@ interface UnlockResult {
  */
 export async function importOpenPgpPrivateKey(
   armoredPrivateKeyText: string,
-  storagePassphrase: string
+  storagePassphrase: string,
+  currentPassphrase: string,
 ): Promise<{ keyRecord: KeyRecord; keyInfo: any }> {
   if (!armoredPrivateKeyText || typeof armoredPrivateKeyText !== 'string') {
     throw new Error('Invalid OpenPGP private key: text block required');
   }
 
   // 1. Parser la clé avec OpenPGP pour s'assurer de sa validité syntaxique
+  // 1. Parser la clé avec OpenPGP et tenter de la déchiffrer avec la currentPassphrase
   let privateKey: openpgp.Key;
   try {
     privateKey = await openpgp.readKey({ armoredKey: armoredPrivateKeyText });
     if (!privateKey.isPrivate()) {
       throw new Error('The provided block is a public key, not a private key');
     }
+
+    // Si la clé est chiffrée (protected), on tente de la déchiffrer avec la passphrase fournie
+    if (!privateKey.isDecrypted()) {
+      const decryptedKey = await openpgp.decryptKey({
+        privateKey,
+        passphrase: currentPassphrase
+      });
+      
+      // On s'assure que le déchiffrement a réussi (OpenPGPjs renvoie la clé déchiffrée)
+      if (!decryptedKey) {
+        throw new Error('Invalid passphrase for this OpenPGP private key');
+      }
+    }
   } catch (err: any) {
-    throw new Error(`OpenPGP key parsing failed: ${err.message}`);
+    throw new Error(`OpenPGP key validation failed: ${err.message}`);
   }
 
   // 2. Extraire les métadonnées de la clé pour remplir le modèle de données attendu par l'UI
   const keyInfo = (await extractKeyInfo(privateKey)) as any;
+  console.log('keyinfo:', keyInfo);
   const email = (keyInfo.emailAddresses?.[0] ?? '').toLowerCase();
+  console.log(email);
   if (!email) {
     throw new Error('OpenPGP private key must be bound to at least one valid email User ID');
   }

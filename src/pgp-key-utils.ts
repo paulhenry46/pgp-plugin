@@ -61,23 +61,20 @@ function extractAlgorithm(key: openpgp.PublicKey | openpgp.PrivateKey): string {
 
 /**
  * Parcourt les User IDs d'une clé pour en extraire toutes les adresses e-mail valides.
- * @param {openpgp.PublicKey|openpgp.PrivateKey} key 
+ * @param {openpgp.Key} key 
  * @returns {string[]}
  */
 function extractEmailAddresses(key: openpgp.PublicKey | openpgp.PrivateKey): string[] {
-  const emails : string[] = [];
-  const userIDs = key.getUserIDs();
+  console.log('extract');
+  const emails: string[] = [];
+  const userIDs = key.users || [];
 
-  for (const userId of userIDs) {
-    if (!userId) continue;
-    const emailMatch = userId.match(/<([^>]+)>/);
-    if (emailMatch && emailMatch[1]) {
-      const email = emailMatch[1].toLowerCase().trim();
-      if (!emails.includes(email)) {
-        emails.push(email);
-      }
+  for (const item of userIDs) {
+    if(item.userID){
+      emails.push(item.userID?.email)
     }
   }
+  
   return emails;
 }
 
@@ -134,13 +131,12 @@ export function classifyCapabilities(key: openpgp.PublicKey | openpgp.PrivateKey
  * Inclut la propriété 'armoredPublicKey' requise pour l'importation de clé.
  */
 export async function extractKeyInfo(key: openpgp.PublicKey | openpgp.PrivateKey) {
+  console.log(key);
   const fingerprint = key.getFingerprint();
   const keyID = key.getKeyID().toHex().toUpperCase();
   
   // Résolution sécurisée de la fonction externe extractEmailAddresses
-  const emails: string[] = typeof (globalThis as any).extractEmailAddresses === 'function' 
-    ? (globalThis as any).extractEmailAddresses(key) 
-    : [];
+  const emails: string[] = extractEmailAddresses(key);
     
   const capabilities = classifyCapabilities(key);
   

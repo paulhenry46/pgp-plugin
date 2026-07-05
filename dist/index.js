@@ -13813,6 +13813,17 @@ init_openpgp_min();
 
 // src/pgp-key-utils.ts
 init_openpgp_min();
+function extractEmailAddresses(key) {
+  console.log("extract");
+  const emails = [];
+  const userIDs = key.users || [];
+  for (const item of userIDs) {
+    if (item.userID) {
+      emails.push(item.userID?.email);
+    }
+  }
+  return emails;
+}
 function classifyCapabilities(key) {
   let canSign = false;
   let canEncrypt = false;
@@ -13842,9 +13853,10 @@ function classifyCapabilities(key) {
   return { canSign, canEncrypt };
 }
 async function extractKeyInfo(key) {
+  console.log(key);
   const fingerprint = key.getFingerprint();
   const keyID = key.getKeyID().toHex().toUpperCase();
-  const emails = typeof globalThis.extractEmailAddresses === "function" ? globalThis.extractEmailAddresses(key) : [];
+  const emails = extractEmailAddresses(key);
   const capabilities = classifyCapabilities(key);
   const primaryUser = await key.getPrimaryUser();
   const subject = primaryUser?.user?.userID?.userID || emails[0] || "Unknown PGP User";
@@ -14010,14 +14022,16 @@ var PgpKeyLockedError = class extends Error {
 };
 async function pgpDecrypt(input) {
   const { cmsBytes, keyRecords, unlockedKeys } = input;
+  console.log("[plugin:smime] : CmsBytes :", cmsBytes);
   const armoredMessage = normalizePgpMessage(cmsBytes);
+  console.log("[plugin:smime] : armored :", armoredMessage);
   let parsedMessage;
   try {
     parsedMessage = await so({ armoredMessage });
   } catch (e2) {
     throw new Error("Impossible de parser le message OpenPGP : " + (e2 instanceof Error ? e2.message : String(e2)));
   }
-  const matchedRecords = findMatchingKeyRecords(parsedMessage, keyRecords);
+  const matchedRecords = await findMatchingKeyRecords(parsedMessage, keyRecords);
   if (matchedRecords.length === 0) {
     throw new Error("Aucune clé OpenPGP importée ne correspond aux destinataires de ce message chiffré.");
   }
@@ -14037,7 +14051,7 @@ async function pgpDecrypt(input) {
       continue;
     }
   }
-  const lockedRecord = matchedRecords.find((record) => !unlockedKeys.has(record.id));
+  const lockedRecord = (await matchedRecords).find((record) => !unlockedKeys.has(record.id));
   if (lockedRecord) {
     throw new PgpKeyLockedError(
       "La clé PGP est verrouillée. Veuillez saisir votre phrase de passe pour déchiffrer.",
@@ -14046,14 +14060,20 @@ async function pgpDecrypt(input) {
   }
   throw new Error("Échec du déchiffrement du message avec les clés disponibles.");
 }
-function findMatchingKeyRecords(parsedMessage, keyRecords) {
+async function findMatchingKeyRecords(parsedMessage, keyRecords) {
   const encryptionKeyIds = parsedMessage.getEncryptionKeyIDs().map((id) => id.toHex().toUpperCase());
   const matches = [];
   for (const record of keyRecords) {
-    if (!record.keyID) continue;
-    const cleanRecordKeyId = record.keyID.toUpperCase();
-    if (encryptionKeyIds.includes(cleanRecordKeyId)) {
-      matches.push(record);
+    if (!record.publicKey) continue;
+    try {
+      const keyInstance = await Za({ armoredKey: record.publicKey });
+      const recordKeyIds = keyInstance.getKeyIDs().map((id) => id.toHex().toUpperCase());
+      const hasMatch = recordKeyIds.some((id) => encryptionKeyIds.includes(id));
+      if (hasMatch) {
+        matches.push(record);
+      }
+    } catch (err) {
+      console.error(`Failed to parse public key for record ${record.id}:`, err);
     }
   }
   return matches;
@@ -14089,7 +14109,7 @@ function detectPgp(contentType, bodyStructure, attachments, textBody) {
   if (contentType) {
     const ct2 = contentType.toLowerCase();
     if (ct2.includes("multipart/encrypted") && ct2.includes('protocol="application/pgp-encrypted"')) {
-      const part = findPgpMimePart(bodyStructure, "application/pgp-encrypted");
+      const part = findPgpMimePart(bodyStructure, "application/octet-stream");
       return {
         type: "pgp-mime-encrypted",
         blobId: bodyStructure?.blobId || part?.blobId,
@@ -14151,7 +14171,7 @@ function walkBodyStructure(part) {
     });
     if (hasPgp) {
       if (type === "multipart/encrypted") {
-        const encryptedControlPart = subParts.find((sp) => sp.type?.toLowerCase().includes("application/pgp-encrypted"));
+        const encryptedControlPart = subParts.find((sp) => sp.type?.toLowerCase().includes("application/octet-stream"));
         return {
           type: "pgp-mime-encrypted",
           blobId: part.blobId || encryptedControlPart?.blobId,
@@ -14466,7 +14486,7 @@ async function clearSessionKeys() {
 init_openpgp_min();
 var KDF_ITERATIONS = 6e5;
 var AES_KEY_LENGTH = 256;
-async function importOpenPgpPrivateKey(armoredPrivateKeyText, storagePassphrase) {
+async function importOpenPgpPrivateKey(armoredPrivateKeyText, storagePassphrase, currentPassphrase) {
   if (!armoredPrivateKeyText || typeof armoredPrivateKeyText !== "string") {
     throw new Error("Invalid OpenPGP private key: text block required");
   }
@@ -14476,11 +14496,22 @@ async function importOpenPgpPrivateKey(armoredPrivateKeyText, storagePassphrase)
     if (!privateKey.isPrivate()) {
       throw new Error("The provided block is a public key, not a private key");
     }
+    if (!privateKey.isDecrypted()) {
+      const decryptedKey = await go({
+        privateKey,
+        passphrase: currentPassphrase
+      });
+      if (!decryptedKey) {
+        throw new Error("Invalid passphrase for this OpenPGP private key");
+      }
+    }
   } catch (err) {
-    throw new Error(`OpenPGP key parsing failed: ${err.message}`);
+    throw new Error(`OpenPGP key validation failed: ${err.message}`);
   }
   const keyInfo = await extractKeyInfo(privateKey);
+  console.log("keyinfo:", keyInfo);
   const email = (keyInfo.emailAddresses?.[0] ?? "").toLowerCase();
+  console.log(email);
   if (!email) {
     throw new Error("OpenPGP private key must be bound to at least one valid email User ID");
   }
@@ -14685,7 +14716,7 @@ async function fetchAttachments(req) {
       out.push({
         filename: att.name || "attachment",
         contentType: att.type || "application/octet-stream",
-        content: await bytes.arrayBuffer()
+        content: bytes
       });
     } catch (err) {
       import_plugin_host.default.log.warn("attachment fetch failed", att.name, err);
@@ -14845,7 +14876,8 @@ async function onRenderEmailBody(body, ctx) {
   const fromEmail = (addrList(ctx.from)[0] || {}).email;
   try {
     const raw = await import_plugin_host.default.jmap.fetchBlob(blobId);
-    const pgpMessageContent = normalizePgpMessage(new Uint8Array(await raw.arrayBuffer()));
+    console.log(raw);
+    const pgpMessageContent = normalizePgpMessage(raw);
     if (detection.type === "pgp-mime-encrypted" || detection.type === "pgp-inline-encrypted" || detection.type === "pgp-encrypted-file") {
       const { keyRecords, unlockedKeys } = await unlockedDecryptMaps();
       let result;
@@ -14899,7 +14931,7 @@ async function onRenderEmailBody(body, ctx) {
     }
     if (detection.type === "pgp-mime-signed" || detection.type === "pgp-inline-signed" || detection.type === "pgp-signature-file") {
       const signatureBlock = detection.signatureBlobId ? await import_plugin_host.default.jmap.fetchBlob(detection.signatureBlobId) : null;
-      const signatureString = signatureBlock ? new TextDecoder().decode(await blobToBytes(signatureBlock)) : null;
+      const signatureString = signatureBlock ? new TextDecoder().decode(signatureBlock) : null;
       const v2 = await pgpVerify(new TextEncoder().encode(pgpMessageContent), fromEmail, signatureString);
       await maybeAutoImportSigner(v2.status);
       const parsed = parseMime(v2.mimeBytes);
@@ -15099,6 +15131,10 @@ function SettingsSection() {
   const [unlocked, setUnlocked] = useState({});
   const [busy, setBusy] = useState(false);
   const [capable, setCapable] = useState(true);
+  const [unlockingKeyId, setUnlockingKeyId] = useState(null);
+  const [unlockPassphrase, setUnlockPassphrase] = useState("");
+  const [hasPrivateFile, setHasPrivateFile] = useState(false);
+  const [passphrase, setPassphrase] = useState("");
   const fileRef = useRef(null);
   const certFileRef = useRef(null);
   const refresh = useCallback(async () => {
@@ -15127,18 +15163,26 @@ function SettingsSection() {
       h3("div", { style: { fontSize: "13px", lineHeight: 1.5 } }, NOT_PRIVILEGED_MSG)
     );
   }
+  function handleFileChange() {
+    const file = fileRef.current && fileRef.current.files && fileRef.current.files[0];
+    setHasPrivateFile(!!file);
+  }
   async function importKeyFile() {
     const file = fileRef.current && fileRef.current.files && fileRef.current.files[0];
     if (!file) return;
-    const storagePass = window.prompt("Enter your OpenPGP passphrase to decrypt and import this private key:");
-    if (storagePass === null) return;
+    if (!passphrase.trim()) {
+      import_plugin_host.default.toast.error("Please enter the OpenPGP passphrase to decrypt this private key.");
+      return;
+    }
     setBusy(true);
     try {
       const text = new TextDecoder().decode(await file.arrayBuffer());
-      const { keyRecord } = await importOpenPgpPrivateKey(text, storagePass);
+      const { keyRecord } = await importOpenPgpPrivateKey(text, passphrase, passphrase);
       await saveKeyRecord(keyRecord);
       import_plugin_host.default.toast.success(`Imported OpenPGP key for ${keyRecord.email || "identity"}`);
       if (fileRef.current) fileRef.current.value = "";
+      setHasPrivateFile(false);
+      setPassphrase("");
       await refresh();
     } catch (err) {
       const error = err;
@@ -15147,12 +15191,18 @@ function SettingsSection() {
       setBusy(false);
     }
   }
-  async function unlock(rec) {
-    const pass = window.prompt(`Passphrase to unlock the OpenPGP key for ${rec.email || "this identity"}:`);
-    if (!pass) return;
+  function initiateUnlock(rec) {
+    setUnlockingKeyId(rec.id);
+    setUnlockPassphrase("");
+  }
+  async function confirmUnlock(rec) {
+    if (!unlockPassphrase.trim()) {
+      import_plugin_host.default.toast.error("Please enter your passphrase.");
+      return;
+    }
     setBusy(true);
     try {
-      const { unlockedPrivateKey, signingKey, decryptionKey } = await unlockPrivateKey(rec, pass);
+      const { unlockedPrivateKey, signingKey, decryptionKey } = await unlockPrivateKey(rec, unlockPassphrase);
       await saveSessionKeys({
         id: rec.id,
         unlockedPrivateKey,
@@ -15160,6 +15210,8 @@ function SettingsSection() {
         decryptionKey
       });
       import_plugin_host.default.toast.success(`Unlocked ${rec.email || "key"}`);
+      setUnlockingKeyId(null);
+      setUnlockPassphrase("");
       await refresh();
     } catch (err) {
       const error = err;
@@ -15241,16 +15293,41 @@ function SettingsSection() {
       ),
       h3(
         "div",
-        { style: { display: "flex", gap: "8px", alignItems: "center", marginBottom: "12px" } },
-        h3("input", { ref: fileRef, type: "file", accept: ".asc,.key,.pgp", style: { fontSize: "13px" } }),
-        h3("button", { type: "button", style: btnPrimary, disabled: busy, onClick: importKeyFile }, "Import private key")
+        { style: { display: "flex", flexDirection: "column", gap: "8px", marginBottom: "12px" } },
+        h3(
+          "div",
+          { style: { display: "flex", gap: "8px", alignItems: "center" } },
+          h3("input", {
+            ref: fileRef,
+            type: "file",
+            accept: ".asc,.key,.pgp",
+            style: { fontSize: "13px" },
+            onChange: handleFileChange
+          }),
+          h3("button", { type: "button", style: btn, disabled: busy, onClick: importKeyFile }, "Import private key")
+        ),
+        hasPrivateFile && h3("input", {
+          type: "password",
+          placeholder: "Enter OpenPGP key passphrase...",
+          value: passphrase,
+          disabled: busy,
+          onChange: (e2) => setPassphrase(e2.target.value),
+          style: {
+            padding: "6px 10px",
+            fontSize: "13px",
+            borderRadius: "4px",
+            border: "1px solid var(--color-border, #e2e8f0)",
+            maxWidth: "320px",
+            marginTop: "4px"
+          }
+        })
       ),
       keys.length === 0 ? h3("div", { style: { ...card, fontSize: "13px", color: "var(--color-muted-foreground, #64748b)" } }, "No keys imported yet.") : h3(
         "div",
         { style: { display: "flex", flexDirection: "column", gap: "8px" } },
         keys.map((rec) => h3(
           "div",
-          { key: rec.id, style: card },
+          { key: rec.id, style: { ...card, display: "flex", flexDirection: "column", gap: "10px" } },
           h3(
             "div",
             { style: { display: "flex", justifyContent: "space-between", gap: "8px", flexWrap: "wrap" } },
@@ -15277,7 +15354,7 @@ function SettingsSection() {
             h3(
               "div",
               { style: { display: "flex", gap: "6px", alignItems: "flex-start" } },
-              unlocked[rec.id] ? h3("button", { type: "button", style: btn, disabled: busy, onClick: () => lock(rec) }, "🔓 Lock") : h3("button", { type: "button", style: btnPrimary, disabled: busy, onClick: () => unlock(rec) }, "🔒 Unlock"),
+              unlocked[rec.id] ? h3("button", { type: "button", style: btn, disabled: busy, onClick: () => lock(rec) }, "🔓 Lock") : h3("button", { type: "button", style: btnPrimary, disabled: busy, onClick: () => initiateUnlock(rec) }, "🔒 Unlock"),
               h3("button", {
                 type: "button",
                 style: { ...btn, color: "var(--color-destructive, #dc2626)", borderColor: "var(--color-destructive, #dc2626)" },
@@ -15285,6 +15362,28 @@ function SettingsSection() {
                 onClick: () => removeKey(rec)
               }, "Delete")
             )
+          ),
+          // Insertion conditionnelle du bloc de saisie SOUS les détails de la clé concernée
+          unlockingKeyId === rec.id && h3(
+            "div",
+            { style: { display: "flex", gap: "8px", alignItems: "center", marginTop: "4px", borderTop: "1px dashed var(--color-border, #e2e8f0)", paddingTop: "8px" } },
+            h3("input", {
+              type: "password",
+              placeholder: "Enter passphrase to unlock...",
+              value: unlockPassphrase,
+              disabled: busy,
+              onChange: (e2) => setUnlockPassphrase(e2.target.value),
+              style: {
+                padding: "4px 8px",
+                fontSize: "13px",
+                borderRadius: "4px",
+                border: "1px solid var(--color-border, #e2e8f0)",
+                flex: 1,
+                maxWidth: "240px"
+              }
+            }),
+            h3("button", { type: "button", style: btnPrimary, disabled: busy, onClick: () => confirmUnlock(rec) }, "OK"),
+            h3("button", { type: "button", style: btn, disabled: busy, onClick: () => setUnlockingKeyId(null) }, "Cancel")
           )
         ))
       )

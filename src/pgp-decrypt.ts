@@ -27,8 +27,9 @@ export async function pgpDecrypt(input: { cmsBytes: Uint8Array, keyRecords: KeyR
   const { cmsBytes, keyRecords, unlockedKeys } = input;
 
   // 1. Normalisation de la charge utile d'entrée
+  console.log('[plugin:smime] : CmsBytes :' ,cmsBytes);
   const armoredMessage = normalizePgpMessage(cmsBytes);
-
+  console.log('[plugin:smime] : armored :' ,armoredMessage);
   let parsedMessage;
   try {
     parsedMessage = await openpgp.readMessage({ armoredMessage });

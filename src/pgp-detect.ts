@@ -30,7 +30,7 @@ export function detectPgp(contentType: string, bodyStructure: any, attachments: 
     const ct = contentType.toLowerCase();
 
     if (ct.includes('multipart/encrypted') && ct.includes('protocol="application/pgp-encrypted"')) {
-      const part = findPgpMimePart(bodyStructure, 'application/pgp-encrypted');
+      const part = findPgpMimePart(bodyStructure, 'application/octet-stream');
       return { 
         type: 'pgp-mime-encrypted', 
         blobId: bodyStructure?.blobId || part?.blobId, // On préfère le blob global pour le déchiffrement complet
@@ -112,7 +112,7 @@ function walkBodyStructure(part: any): PgpDetectionResult | null {
 
     if (hasPgp) {
       if (type === 'multipart/encrypted') {
-        const encryptedControlPart = subParts.find((sp: any) => sp.type?.toLowerCase().includes('application/pgp-encrypted'));
+        const encryptedControlPart = subParts.find((sp: any) => sp.type?.toLowerCase().includes('application/octet-stream'));
         return { 
           type: 'pgp-mime-encrypted', 
           blobId: part.blobId || encryptedControlPart?.blobId, 
