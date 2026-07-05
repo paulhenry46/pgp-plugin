@@ -19,7 +19,8 @@ export async function pgpEncrypt(
   mimeBytes: Uint8Array, 
   recipientPublicKeysArmored: string[], 
   senderPublicKeyArmored: string, 
-  useAes128: boolean
+  useAes128: boolean,
+  signingKey?: openpgp.PrivateKey // <-- Paramètre optionnel ajouté pour la signature combinée
 ): Promise<Blob> {
   
   // 1. Fusion et dédoublonnement des clés publiques
@@ -30,7 +31,6 @@ export async function pgpEncrypt(
   }
 
   // 2. Parsing des clés pour l'API OpenPGP
-  // Correction TypeScript : Déclaration d'un tableau typé pour l'API encrypt
   const encryptionKeys: openpgp.PublicKey[] = [];
   
   for (const keyArmored of allKeyStrings) {
@@ -52,20 +52,28 @@ export async function pgpEncrypt(
   // 4. Configuration de l'algorithme symétrique (Session Key)
   const algorithm = useAes128 ? openpgp.enums.symmetric.aes128 : openpgp.enums.symmetric.aes256;
 
-  // 5. Chiffrement de bout en bout
-  // Correction Erreur : Changement de preferredSymmetricAlgorithms en preferredSymmetricAlgorithm
-  const encryptedArmored = await openpgp.encrypt({
+  // 5. Configuration dynamique de l'objet d'options pour openpgp.encrypt
+  const encryptOptions: any = {
     message,
     encryptionKeys,
     config: { 
       preferredSymmetricAlgorithm: algorithm 
     }
-  });
+  };
 
-  console.log('message:',message)
-  console.log('message encrypted:',encryptedArmored)
-  // 6. Retourne un Blob texte au format standard OpenPGP chiffré
-  // OpenPGP.js renvoie par défaut une String au format armored si l'option format n'est pas modifiée.
+  // Si une clé de signature est passée, on l'ajoute dans les options.
+  // OpenPGP.js s'occupe alors de signer le payload binaire en interne avant de le chiffrer.
+  if (signingKey) {
+    encryptOptions.signingKeys = signingKey;
+  }
+
+  // 6. Chiffrement de bout en bout
+  const encryptedArmored = await openpgp.encrypt(encryptOptions);
+
+  console.log('message:', message);
+  console.log('message encrypted:', encryptedArmored);
+  
+  // 7. Retourne un Blob texte au format standard OpenPGP chiffré
   return new Blob([encryptedArmored as string], { type: 'application/pgp-encrypted; charset=utf-8' });
 }
 

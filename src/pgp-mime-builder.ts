@@ -17,24 +17,17 @@ const CRLF = '\r\n';
  */
 export function buildMimeMessage(input: any): Uint8Array {
   const msg = createMimeMessage();
-  console.log('build mime 1');
   // 1. En-têtes basiques
   msg.setSender(input.from);
-  console.log('build mime 11');
   msg.setTo(input.to);
-  console.log('build mime 111');
   if (input.cc?.length) msg.setCc(input.cc);
-  console.log('build mime 00');
   msg.setSubject(input.subject);
-  console.log('build mime 2222');
   if (input.inReplyTo) msg.setHeader('In-Reply-To', input.inReplyTo);
   if (input.references?.length) msg.setHeader('References', input.references.join(' '));
-  console.log('build mime 2');
   // Custom Message-ID si fourni, sinon généré par mimetext
   if (input.messageId) {
     msg.setHeader('Message-ID', input.messageId);
   }
-  console.log('build mime 3');
   // 2. Gestion du corps (Texte / HTML)
   if (input.textBody) msg.addMessage({ contentType: 'text/plain', data: input.textBody });
   if (input.htmlBody) msg.addMessage({ contentType: 'text/html', data: input.htmlBody });
@@ -61,18 +54,13 @@ export function wrapAsPgpMimeEncrypted(pgpEncryptedBlob: Blob | string, input: a
   const boundary = generateBoundary();
   const lines = [];
 
-  // En-têtes globaux du message de transport
   lines.push(formatHeader('From', formatAddress(input.from)));
-  // 1. On force input.to à être un tableau (gère le cas où c'est une string unique)
-    const toEntries = Array.isArray(input.to) ? input.to : [input.to];
+  const toEntries = Array.isArray(input.to) ? input.to : [input.to];
+  const cleanTo = toEntries
+    .map((t: any) => typeof t === 'string' ? t : (t.email || t.addr || ''))
+    .filter(Boolean);
 
-    // 2. On extrait proprement l'adresse mail (gère le cas où ce sont des objets {email: ...} ou des strings)
-    const cleanTo = toEntries
-      .map((t: any) => typeof t === 'string' ? t : (t.email || t.addr || ''))
-      .filter(Boolean); // Supprime les entrées vides s'il y en a
-
-    // 3. On pousse dans le tableau de lignes
-    lines.push(formatHeader('To', cleanTo.join(', ')));
+  lines.push(formatHeader('To', cleanTo.join(', ')));
   
   if (input.cc?.length) lines.push(formatHeader('Cc', input.cc.map(formatAddress).join(', ')));
   lines.push(formatHeader('Subject', encodeHeaderValue(input.subject)));
@@ -82,11 +70,9 @@ export function wrapAsPgpMimeEncrypted(pgpEncryptedBlob: Blob | string, input: a
   if (input.references?.length) lines.push(formatHeader('References', input.references.join(' ')));
   lines.push('MIME-Version: 1.0');
   
-  // Content-Type strict pour PGP/MIME Chiffré (RFC 3156)
   lines.push(`Content-Type: multipart/encrypted; protocol="application/pgp-encrypted"; boundary="${boundary}"`);
   lines.push('');
 
-  // Première partie : Le signal de contrôle obligatoire (Version 1)
   lines.push(`--${boundary}`);
   lines.push('Content-Type: application/pgp-encrypted');
   lines.push('Content-Description: PGP/MIME version identification');
@@ -94,21 +80,17 @@ export function wrapAsPgpMimeEncrypted(pgpEncryptedBlob: Blob | string, input: a
   lines.push('Version: 1');
   lines.push('');
 
-  // Deuxième partie : Le payload chiffré lui-même
   lines.push(`--${boundary}`);
   lines.push('Content-Type: application/octet-stream; name="encrypted.asc"');
   lines.push('Content-Description: OpenPGP encrypted message');
   lines.push('Content-Disposition: inline; filename="encrypted.asc"');
-  // AJOUT : Indique au parseur que c'est du texte brut 7bit/8bit 
-  // Cela isole le bloc OpenPGP des en-têtes MIME ci-dessus.
   lines.push('Content-Transfer-Encoding: 7bit'); 
-  lines.push(''); // Saut de ligne obligatoire après le dernier en-tête MIME
+  lines.push(''); 
 
-  // On s'assure que lines se termine bien par un CRLF propre avant d'injecter le blob
   const headerBytes = new TextEncoder().encode(lines.join(CRLF) + CRLF);
   const closingBytes = new TextEncoder().encode(`${CRLF}--${boundary}--${CRLF}`);
 
-  // On assemble les en-têtes, le texte asymétrique chiffré et la balise de fermeture du multipart
+  // Utilisation stricte de application/octet-stream pour contourner les parsers agressifs (Stalwart)
   return new Blob([headerBytes, pgpEncryptedBlob, closingBytes], { type: 'application/octet-stream' });
 }
 
@@ -123,18 +105,13 @@ export function wrapAsPgpMimeSigned(clearMimeBytes: Blob | string, pgpSignatureB
   const boundary = generateBoundary();
   const lines = [];
 
-  // En-têtes globaux du message de transport
   lines.push(formatHeader('From', formatAddress(input.from)));
-  // 1. On force input.to à être un tableau (gère le cas où c'est une string unique)
-    const toEntries = Array.isArray(input.to) ? input.to : [input.to];
+  const toEntries = Array.isArray(input.to) ? input.to : [input.to];
+  const cleanTo = toEntries
+    .map((t: string) => t)
+    .filter(Boolean);
 
-    // 2. On extrait proprement l'adresse mail (gère le cas où ce sont des objets {email: ...} ou des strings)
-    const cleanTo = toEntries
-      .map((t: string) => t)
-      .filter(Boolean); // Supprime les entrées vides s'il y en a
-
-    // 3. On pousse dans le tableau de lignes
-    lines.push(formatHeader('To', cleanTo.join(', ')));
+  lines.push(formatHeader('To', cleanTo.join(', ')));
   if (input.cc?.length) lines.push(formatHeader('Cc', input.cc.map(formatAddress).join(', ')));
   lines.push(formatHeader('Subject', encodeHeaderValue(input.subject)));
   lines.push(formatHeader('Date', formatDate(input.date ?? new Date())));
@@ -143,11 +120,10 @@ export function wrapAsPgpMimeSigned(clearMimeBytes: Blob | string, pgpSignatureB
   if (input.references?.length) lines.push(formatHeader('References', input.references.join(' ')));
   lines.push('MIME-Version: 1.0');
   
-  // Content-Type strict pour PGP/MIME Signé (L'en-tête micalg SHA-256 est standard)
   lines.push(`Content-Type: multipart/signed; micalg=pgp-sha256; protocol="application/pgp-signature"; boundary="${boundary}"`);
   lines.push('');
 
-  // Première partie : Le contenu MIME lisible complet (avec ses propres sous-composants, images, etc.)
+  // Première partie : Le contenu MIME lisible complet
   lines.push(`--${boundary}`);
   
   const initialHeaderBytes = new TextEncoder().encode(lines.join(CRLF) + CRLF);
@@ -159,12 +135,15 @@ export function wrapAsPgpMimeSigned(clearMimeBytes: Blob | string, pgpSignatureB
   middleLines.push('Content-Type: application/pgp-signature; name="signature.asc"');
   middleLines.push('Content-Description: OpenPGP digital signature');
   middleLines.push('Content-Disposition: attachment; filename="signature.asc"');
+  // AJOUT : Protection contre l'altération de la signature par Stalwart
+  middleLines.push('Content-Transfer-Encoding: 7bit');
   middleLines.push('');
 
-  const middleBytes = new TextEncoder().encode(middleLines.join(CRLF));
+  const middleBytes = new TextEncoder().encode(middleLines.join(CRLF) + CRLF);
   const closingBytes = new TextEncoder().encode(`${CRLF}--${boundary}--${CRLF}`);
-  const blob = new Blob([initialHeaderBytes, clearMimeBytes, middleBytes, pgpSignatureBlob, closingBytes], { type: 'message/rfc822' })
-  return blob;
+  
+  // Remplacement du type 'message/rfc822' par 'application/octet-stream' pour éviter les modifications du serveur JMAP
+  return new Blob([initialHeaderBytes, clearMimeBytes, middleBytes, pgpSignatureBlob, closingBytes], { type: 'application/octet-stream' });
 }
 
 // ── Low-Level Format Helpers (Conservés pour les enveloppes de transport) ─────────────────

@@ -13609,22 +13609,15 @@ async function clearArmoredPrivateKeyToPrivateKey(armoredKey) {
 var CRLF = "\r\n";
 function buildMimeMessage(input) {
   const msg = c();
-  console.log("build mime 1");
   msg.setSender(input.from);
-  console.log("build mime 11");
   msg.setTo(input.to);
-  console.log("build mime 111");
   if (input.cc?.length) msg.setCc(input.cc);
-  console.log("build mime 00");
   msg.setSubject(input.subject);
-  console.log("build mime 2222");
   if (input.inReplyTo) msg.setHeader("In-Reply-To", input.inReplyTo);
   if (input.references?.length) msg.setHeader("References", input.references.join(" "));
-  console.log("build mime 2");
   if (input.messageId) {
     msg.setHeader("Message-ID", input.messageId);
   }
-  console.log("build mime 3");
   if (input.textBody) msg.addMessage({ contentType: "text/plain", data: input.textBody });
   if (input.htmlBody) msg.addMessage({ contentType: "text/html", data: input.htmlBody });
   if (input.attachments?.length) {
@@ -13691,11 +13684,11 @@ function wrapAsPgpMimeSigned(clearMimeBytes, pgpSignatureBlob, input) {
   middleLines.push('Content-Type: application/pgp-signature; name="signature.asc"');
   middleLines.push("Content-Description: OpenPGP digital signature");
   middleLines.push('Content-Disposition: attachment; filename="signature.asc"');
+  middleLines.push("Content-Transfer-Encoding: 7bit");
   middleLines.push("");
-  const middleBytes = new TextEncoder().encode(middleLines.join(CRLF));
+  const middleBytes = new TextEncoder().encode(middleLines.join(CRLF) + CRLF);
   const closingBytes = new TextEncoder().encode(`${CRLF}--${boundary}--${CRLF}`);
-  const blob = new Blob([initialHeaderBytes, clearMimeBytes, middleBytes, pgpSignatureBlob, closingBytes], { type: "message/rfc822" });
-  return blob;
+  return new Blob([initialHeaderBytes, clearMimeBytes, middleBytes, pgpSignatureBlob, closingBytes], { type: "application/octet-stream" });
 }
 function generateBoundary() {
   const bytes = crypto.getRandomValues(new Uint8Array(16));
@@ -13757,18 +13750,6 @@ function base64EncodeRaw(data) {
 
 // src/pgp-sign.ts
 init_openpgp_min();
-async function pgpSignInline(mimeBytes, unlockedPrivateKey) {
-  if (!unlockedPrivateKey || !unlockedPrivateKey.isDecrypted || !unlockedPrivateKey.isDecrypted()) {
-    throw new Error("Une clé privée OpenPGP valide et déverrouillée est requise pour signer.");
-  }
-  const message = await ao({ binary: mimeBytes });
-  const armoredSignedMessage = await mo({
-    message,
-    signingKeys: unlockedPrivateKey,
-    detached: false
-  });
-  return new TextEncoder().encode(armoredSignedMessage);
-}
 async function pgpSignDetached(mimeBytes, unlockedPrivateKey) {
   if (!unlockedPrivateKey || !unlockedPrivateKey.isDecrypted || !unlockedPrivateKey.isDecrypted()) {
     throw new Error("Une clé privée OpenPGP valide et déverrouillée est requise pour signer.");
@@ -13785,7 +13766,7 @@ async function pgpSignDetached(mimeBytes, unlockedPrivateKey) {
 
 // src/pgp-encrypt.ts
 init_openpgp_min();
-async function pgpEncrypt(mimeBytes, recipientPublicKeysArmored, senderPublicKeyArmored, useAes1282) {
+async function pgpEncrypt(mimeBytes, recipientPublicKeysArmored, senderPublicKeyArmored, useAes1282, signingKey) {
   const allKeyStrings = deduplicateKeys([...recipientPublicKeysArmored, senderPublicKeyArmored]);
   if (allKeyStrings.length === 0) {
     throw new Error("Aucune clé publique de destinataire ou d’expéditeur fournie.");
@@ -13804,13 +13785,17 @@ async function pgpEncrypt(mimeBytes, recipientPublicKeysArmored, senderPublicKey
   }
   const message = await ao({ binary: mimeBytes });
   const algorithm = useAes1282 ? R.symmetric.aes128 : R.symmetric.aes256;
-  const encryptedArmored = await Ao({
+  const encryptOptions = {
     message,
     encryptionKeys,
     config: {
       preferredSymmetricAlgorithm: algorithm
     }
-  });
+  };
+  if (signingKey) {
+    encryptOptions.signingKeys = signingKey;
+  }
+  const encryptedArmored = await Ao(encryptOptions);
   console.log("message:", message);
   console.log("message encrypted:", encryptedArmored);
   return new Blob([encryptedArmored], { type: "application/pgp-encrypted; charset=utf-8" });
@@ -14808,17 +14793,22 @@ async function onComposeSend(req) {
         import_plugin_host.default.toast.error(`Missing encryption key for: ${missing.join(", ")}`);
         return false;
       }
-      let payloadToEncrypt = clearMimeBytes;
+      let signingKeyForEncrypt = void 0;
       if (sign) {
-        console.log("sign and encrypt Message");
+        console.log("preparing native signing key for combined encryption");
         if (!session || !session.signingKey) {
           import_plugin_host.default.toast.error("Your OpenPGP key is locked. Unlock it in Settings, then resend.");
           return false;
         }
-        payloadToEncrypt = await pgpSignInline(clearMimeBytes, await clearArmoredPrivateKeyToPrivateKey(session.signingKey));
+        signingKeyForEncrypt = await clearArmoredPrivateKeyToPrivateKey(session.signingKey);
       }
-      const encryptedBlob = await pgpEncrypt(payloadToEncrypt, found, currentKeyRecord.publicKey, useAes128());
-      console.log();
+      const encryptedBlob = await pgpEncrypt(
+        clearMimeBytes,
+        found,
+        currentKeyRecord.publicKey,
+        useAes128(),
+        signingKeyForEncrypt
+      );
       finalEnvelopeBlob = wrapAsPgpMimeEncrypted(encryptedBlob, {
         from,
         to: req.to,

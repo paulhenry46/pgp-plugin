@@ -12,6 +12,7 @@
  */
 import host from '@plugin-host';
 import React from 'react'
+import * as openpgp from 'openpgp'; 
 const h = React.createElement;
 const { useState, useEffect, useCallback, useRef } = React;
 
@@ -261,7 +262,6 @@ export async function onComposeSend(req: ComposeRequest): Promise<boolean | unde
     if (!from.addr) throw new Error('Could not determine sender address');
     const allRecipientEmails = [...emailsOf(req.to), ...emailsOf(req.cc), ...emailsOf(req.bcc)];
 
-    // Initialisation typée
     console.log('from:' ,req.fromEmail, from.addr);
     let keyRecord: KeyRecord | undefined = undefined;
     if (sign || encrypt) {
@@ -289,16 +289,14 @@ export async function onComposeSend(req: ComposeRequest): Promise<boolean | unde
     });
 
     let finalEnvelopeBlob: Blob | undefined;
-    console.log('builded Message')
-    // À ce stade, TypeScript sait que si (sign || encrypt) est vrai, keyRecord est défini
-    // Mais pour satisfaire l'analyseur strict, on ajoute une assertion ou une garde locale
+    console.log('builded Message');
+    
     const currentKeyRecord = keyRecord as KeyRecord;
     const session = await getSessionKeys(currentKeyRecord.id);
 
     // 2. Traitement des combinaisons Cryptographiques (Sign, Encrypt, ou Sign+Encrypt)
     if (encrypt) {
-      console.log('encrypt Message')
-      // Résolution des clés destinataires
+      console.log('encrypt Message');
       const { found, missing } = await recipientKeysFor(allRecipientEmails);
       console.log('RecipientKey :', found);
       if (missing.length > 0) {
@@ -306,22 +304,26 @@ export async function onComposeSend(req: ComposeRequest): Promise<boolean | unde
         return false;
       }
 
-      let payloadToEncrypt = clearMimeBytes;
-
-      // Si Signature + Chiffrement, on effectue un chiffrement de la structure signée (Sign-then-Encrypt)
+      // Résolution de la clé de signature si requise
+      let signingKeyForEncrypt: openpgp.PrivateKey | undefined = undefined;
       if (sign) {
-        console.log('sign and encrypt Message')
+        console.log('preparing native signing key for combined encryption');
         if (!session || !session.signingKey) {
           host.toast.error('Your OpenPGP key is locked. Unlock it in Settings, then resend.');
           return false;
         }
-        // En PGP/MIME chiffré, on privilégie la signature Inline intégrée au bloc chiffré pour maximiser la compatibilité
-        payloadToEncrypt = await pgpSignInline(clearMimeBytes, await clearArmoredPrivateKeyToPrivateKey(session.signingKey));
+        signingKeyForEncrypt = await clearArmoredPrivateKeyToPrivateKey(session.signingKey);
       }
 
-      // Chiffrement global
-      const encryptedBlob = await pgpEncrypt(payloadToEncrypt, found, currentKeyRecord.publicKey, useAes128());
-      console.log()
+      // Chiffrement global (combiné avec signature si sign est vrai)
+      const encryptedBlob = await pgpEncrypt(
+        clearMimeBytes, 
+        found, 
+        currentKeyRecord.publicKey, 
+        useAes128(), 
+        signingKeyForEncrypt
+      );
+      
       // Encapsulation au standard strict PGP/MIME multipart/encrypted (RFC 3156)
       finalEnvelopeBlob =  wrapAsPgpMimeEncrypted(encryptedBlob, {
         from, to: req.to, cc: req.cc, subject: req.subject || '', inReplyTo: req.inReplyTo, references: req.references, messageId: req.messageId
@@ -355,8 +357,8 @@ export async function onComposeSend(req: ComposeRequest): Promise<boolean | unde
     const envelopeRecipients = [...new Set([...allRecipientEmails])];
     console.log('Sending raw bytes to JMAP:', rawBytes, 'Recipients:', envelopeRecipients);
 
-   const result = await host.jmap.sendRaw(bytesArrayBuffer(rawBytes), identityId, { envelopeRecipients });
-   console.log(result);
+    const result = await host.jmap.sendRaw(bytesArrayBuffer(rawBytes), identityId, { envelopeRecipients });
+    console.log(result);
 
     host.toast.success(
       encrypt && sign ? 'Message signed, encrypted and sent (PGP/MIME)'
