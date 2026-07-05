@@ -23,9 +23,9 @@ declare module '@plugin-host' {
   };
   export const plugin: {
     settings?: {
-      encryptionStrength?: 'aes-128' | 'aes-256';
       autoImportSignerCerts?: boolean;
-      warnOnSelfSigned?: boolean;
+      defaultSign?: boolean;
+      defaultEncrypt?: boolean;
       lockOnLogout?: boolean;
     };
   } | undefined;

@@ -24,13 +24,6 @@
   "icon": "media/icon.svg",
   "banner": "media/banner.svg",
   "settingsSchema": {
-    "encryptionStrength": {
-      "type": "select",
-      "label": "Content encryption algorithm",
-      "description": "Symmetric cipher used to encrypt the message body. AES-256-GCM is recommended; AES-128-GCM is slightly smaller and still strong.",
-      "default": "aes-256",
-      "options": ["aes-256", "aes-128"]
-    },
     "autoImportSignerCerts": {
       "type": "boolean",
       "label": "Auto-save signer certificates",
@@ -43,10 +36,16 @@
       "description": "Wipe all unlocked private keys from memory when you sign out or switch accounts. Leave on unless you have a specific reason not to.",
       "default": true
     },
-    "warnOnSelfSigned": {
+    "defaultEncrypt": {
       "type": "boolean",
-      "label": "Warn on self-signed signer",
-      "description": "Show a caution banner when an incoming signature validates against a self-signed certificate (not chained to a trusted CA).",
+      "label": "Default encrypt",
+      "description": "Whether to encrypt messages by default.",
+      "default": true
+    },
+    "defaultSign": {
+      "type": "boolean",
+      "label": "Default sign",
+      "description": "Whether to sign messages by default.",
       "default": true
     }
   },

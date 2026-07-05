@@ -40,20 +40,6 @@ const PREFS_KEY = 'prefs.v1';
 const INTENT_KEY = 'composeIntent.v1';
 const VERIFY_PREFIX = 'verify:';
 
-const DEFAULT_PREFS = { defaultSign: false, defaultEncrypt: false };
-
-async function getPrefs() {
-  try {
-    const p = await host.storage.get(PREFS_KEY);
-    return { ...DEFAULT_PREFS, ...(p || {}) };
-  } catch {
-    return { ...DEFAULT_PREFS };
-  }
-}
-async function setPrefs(next: any) {
-  await host.storage.set(PREFS_KEY, next);
-}
-
 function settings() {
   return host.plugin?.settings || {};
 }
@@ -182,9 +168,8 @@ async function resolveIntent(req:any) {
 
   if (sign === undefined && encrypt === undefined) {
     const stored = (await host.storage.get(INTENT_KEY)) || {};
-    const prefs = await getPrefs();
-    sign = typeof stored.sign === 'boolean' ? stored.sign : prefs.defaultSign;
-    encrypt = typeof stored.encrypt === 'boolean' ? stored.encrypt : prefs.defaultEncrypt;
+    sign = typeof stored.sign === 'boolean' ? stored.sign : settings().defaultSign;
+    encrypt = typeof stored.encrypt === 'boolean' ? stored.encrypt : settings().defaultEncrypt;
   }
   return { sign: !!sign, encrypt: !!encrypt };
 }
@@ -567,11 +552,11 @@ function ComposerToolbar() {
       try {
         if (!(await isCapable())) { if (alive) setReady(false); return; }
         const stored = (await host.storage.get(INTENT_KEY)) || {};
-        const prefs = await getPrefs();
+        
         if (alive) {
           setIntent({
-            sign: typeof stored.sign === 'boolean' ? stored.sign : !!prefs.defaultSign,
-            encrypt: typeof stored.encrypt === 'boolean' ? stored.encrypt : !!prefs.defaultEncrypt,
+            sign: typeof stored.sign === 'boolean' ? stored.sign : !!settings().defaultSign,
+            encrypt: typeof stored.encrypt === 'boolean' ? stored.encrypt : !!settings().defaultEncrypt,
           });
         }
         const recs = await listKeyRecords();
@@ -746,16 +731,10 @@ function EmailBanner(props: EmailProps) {
 
 // ─── UI: settings section (key management) ─────────────────────────────
 
-interface Prefs {
-  defaultSign?: boolean;
-  defaultEncrypt?: boolean;
-  [key: string]: any;
-}
 
 function SettingsSection() {
   const [keys, setKeys] = useState<KeyRecord[]>([]);
   const [certs, setCerts] = useState<PublicCert[]>([]); 
-  const [prefs, setPrefsState] = useState<Prefs>(DEFAULT_PREFS);
   const [unlocked, setUnlocked] = useState<Record<string, boolean>>({});
   const [busy, setBusy] = useState<boolean>(false);
   const [capable, setCapable] = useState<boolean>(true);
@@ -771,8 +750,8 @@ function SettingsSection() {
 
   const refresh = useCallback(async () => {
     if (!(await isCapable())) { setCapable(false); return; }
-    const [k, c, p] = await Promise.all([listKeyRecords(), listPublicCerts(), getPrefs()]);
-    setKeys(k); setCerts(c); setPrefsState(p);
+    const [k, c] = await Promise.all([listKeyRecords(), listPublicCerts()]);
+    setKeys(k); setCerts(c);
     
     const u: Record<string, boolean> = {};
     for (const rec of k) {
@@ -921,11 +900,6 @@ function SettingsSection() {
     await refresh();
   }
 
-  async function setPref(key: keyof Prefs, value: boolean) {
-    const next = { ...prefs, [key]: value };
-    setPrefsState(next);
-    await setPrefs(next);
-  }
 
   return h('div', { style: { display: 'flex', flexDirection: 'column', gap: '16px', maxWidth: '720px' } },
   h('div', null,
@@ -1032,16 +1006,6 @@ function SettingsSection() {
             h('button', { type: 'button', style: { ...btn, color: 'var(--color-destructive, #dc2626)' }, onClick: () => removeCert(c) }, 'Remove'),
           )),
         ),
-    ),
-
-    h('div', null,
-      h('h3', { style: { margin: '0 0 8px', fontSize: '15px', fontWeight: 600 } }, 'Defaults for new messages'),
-      h('label', { style: { display: 'flex', gap: '8px', alignItems: 'center', fontSize: '13px', marginBottom: '6px' } },
-        h('input', { type: 'checkbox', checked: !!prefs.defaultSign, onChange: (e) => setPref('defaultSign', e.target.checked) }),
-        'Sign new messages by default'),
-      h('label', { style: { display: 'flex', gap: '8px', alignItems: 'center', fontSize: '13px' } },
-        h('input', { type: 'checkbox', checked: !!prefs.defaultEncrypt, onChange: (e) => setPref('defaultEncrypt', e.target.checked) }),
-        'Encrypt new messages by default (when all recipients have verified keys)'),
     ),
   );
 }
