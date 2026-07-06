@@ -5,8 +5,6 @@
 
 import * as openpgp from 'openpgp';
 import host from '@plugin-host';
-import { listPublicCerts, savePublicCert } from './key-storage.ts';
-import { generateUUID } from './util.ts';
 import { importOpenPgpPublicKey } from './pgp-import.ts';
 // ── Helpers & Conversions ───────────────────────────────────────────
 

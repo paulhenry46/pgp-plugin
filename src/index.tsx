@@ -332,7 +332,7 @@ export async function onComposeSend(req: ComposeRequest): Promise<boolean | unde
       throw new Error('Cryptographic processing failed to generate an output envelope.');
     }
     console.log('finalEnvelopeBlob', finalEnvelopeBlob);
-    // 3. Extraction et soumission brute au serveur JMAP
+
     const final_text = await finalEnvelopeBlob.text();
     console.log('final text: ', final_text);
     const rawBytes = await blobToBytes(finalEnvelopeBlob);
@@ -395,7 +395,6 @@ export async function onRenderEmailBody(body: any, ctx: any) {
   if (!(await isCapable())) return undefined;
   await host.storage.set(VERIFY_PREFIX + ctx.id, { isEncrypted: null, processing: true });
 
-  // Détection OpenPGP
   const detection = detectPgp(ctx.contentType, ctx.bodyStructure, ctx.attachments, ctx.textBody);
   if (!detection.type) return undefined;
 
@@ -419,7 +418,7 @@ export async function onRenderEmailBody(body: any, ctx: any) {
     console.log(raw);
     const pgpMessageContent = normalizePgpMessage(raw);
 
-    // ── Cas 1 : Traitement du Payload Chiffré (Dans onRenderEmailBody) ──
+    // ── Case 1 : encrypted and meybe signed ──
     if (detection.type === 'pgp-mime-encrypted' || detection.type === 'pgp-inline-encrypted' || detection.type === 'pgp-encrypted-file') {
       const { keyRecords, unlockedKeys } = await unlockedDecryptMaps();
       
@@ -530,7 +529,7 @@ export async function onRenderEmailBody(body: any, ctx: any) {
       };
     }
 
-    // ── Cas 2 : Traitement du Payload Signé (Vérification harmonisée) ──
+    // ── Case 2 : just signed ──
     if (detection.type === 'pgp-mime-signed' || detection.type === 'pgp-inline-signed' || detection.type === 'pgp-signature-file') {
       
       // TS compile correctement car signatureBlobId est désormais défini dans l'interface PgpDetectionResult
@@ -600,7 +599,6 @@ function isExpired(iso: string | number | Date | null) {
 
 // ─── UI: composer toolbar (Sign / Encrypt toggles) ─────────────────────
 
-// 1. Définition de l'interface pour l'état d'intention
 interface PgpIntent {
   sign: boolean;
   encrypt: boolean;
@@ -801,11 +799,10 @@ function EmailBanner(props: EmailProps) {
       alive = false;
       if (intervalId !== null) clearInterval(intervalId);
     };
-  }, [emailId]); // Important : s'exécute à nouveau si l'ID change
+  }, [emailId]);
 
   if (!emailId || !status) return null;
 
-  // ── Reste de la logique graphique (Inchangé) ──
   const rows: BannerRow[] = [];
  
   if (status.isEncrypted) {
