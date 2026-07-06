@@ -4,7 +4,10 @@
  */
 
 import * as openpgp from 'openpgp';
-
+import host from '@plugin-host';
+import { listPublicCerts, savePublicCert } from './key-storage.ts';
+import { generateUUID } from './util.ts';
+import { importOpenPgpPublicKey } from './pgp-import.ts';
 // ── Helpers & Conversions ───────────────────────────────────────────
 
 /**
@@ -193,4 +196,83 @@ export async function extractKeyInfo(key: openpgp.PublicKey | openpgp.PrivateKey
     capabilities,
     armoredPublicKey, // Ajout de la propriété attendue par pgp-import.ts
   };
+}
+
+// 💡 NOUVEAU : Scan des pièces jointes du message décapsulé
+  export async function scanAndImportKeysFromAttachments(attachments: any[]) {
+    if (!attachments || attachments.length === 0) return;
+    console.log(`[PGP] Scan des pièces jointes pour les clés PGP`, attachments);
+    for (const att of attachments) {
+      // On cible les extensions courantes de clés publiques PGP ou le type MIME armor
+      const isKeyExtension = att.name && (
+        att.name.endsWith('.asc') || 
+        att.name.endsWith('.key') || 
+        att.name.endsWith('.pub')
+      );
+      const isKeyMime = att.contentType && (
+        att.contentType.includes('application/pgp-keys') || 
+        att.contentType.includes('text/pgp-public-key')
+      );
+
+      if (isKeyExtension || isKeyMime) {
+        try {
+          let contentStr = '';
+
+          // Si le framework extrait déjà le contenu textuel ou les bytes de la pièce jointe :
+          if (att.content) {
+            contentStr = typeof att.content === 'string' 
+              ? att.content 
+              : new TextDecoder().decode(att.content);
+          } 
+          // Sinon, si on doit aller chercher les bytes du sous-blob de la pièce jointe via l'hôte :
+          else if (att.blobId) {
+            const blobBytes = await host.jmap.fetchBlob(att.blobId);
+            contentStr = new TextDecoder().decode(blobBytes);
+          }
+          else if (att.dataUrl) {
+          const dataUrlStr = String(att.dataUrl);
+          
+          // On vérifie si la chaîne utilise l'encodage base64
+          if (dataUrlStr.includes(';base64,')) {
+            const base64Part = dataUrlStr.split(';base64,')[1];
+            if (base64Part) {
+              // Décodage de la chaîne Base64 en chaîne de caractères binaire
+              const decodedBinary = atob(base64Part.trim());
+              // Utilisation de TextDecoder pour s'assurer du respect de l'UTF-8
+              const bytes = new Uint8Array(decodedBinary.length);
+              for (let i = 0; i < decodedBinary.length; i++) {
+                bytes[i] = decodedBinary.charCodeAt(i);
+              }
+              contentStr = new TextDecoder().decode(bytes);
+            }
+          } else if (dataUrlStr.includes(',')) {
+            // Si c'est un dataUrl brut sans base64 (ex: data:text/plain,texte...)
+            const rawPart = dataUrlStr.split(',')[1];
+            if (rawPart) {
+              contentStr = decodeURIComponent(rawPart);
+            }
+          }
+        }
+
+          // Si le fichier contient bien l'armure standard, on tente l'import
+          if (contentStr && contentStr.includes('-----BEGIN PGP PUBLIC KEY BLOCK-----')) {
+            await maybeAutoImportSigner(contentStr);
+          }
+        } catch (attErr) {
+          host.log.warn(`[PGP] Échec de la lecture de la pièce jointe ${att.name}`, attErr);
+        }
+      }
+    }
+  };
+
+async function maybeAutoImportSigner(pub:string) {
+  console.log('maybeAutoImportSigner', pub);
+  if (host.plugin?.settings?.autoImportSignerCerts === false) return;
+  const cert = pub; // On garde .signerCert pour la compatibilité sémantique de l'UI
+ 
+  try {
+     const email =  await importOpenPgpPublicKey(cert);
+  } catch (err) {
+    host.log.warn('auto-import signer key failed', err);
+  }
 }

@@ -9,7 +9,7 @@
 import * as openpgp from 'openpgp';
 import { generateUUID } from './util.js';
 import { extractKeyInfo } from './pgp-key-utils.js';
-import { KeyRecord } from './key-storage.ts'; // Import direct de l'interface partagée
+import { KeyRecord, listPublicCerts, savePublicCert } from './key-storage.ts'; // Import direct de l'interface partagée
 
 const KDF_ITERATIONS = 600_000;
 const AES_KEY_LENGTH = 256;
@@ -172,3 +172,29 @@ async function encryptPrivateKeyData(pkcs8Bytes: ArrayBuffer, passphrase: string
   const encrypted = await crypto.subtle.encrypt({ name: 'AES-GCM', iv }, wrappingKey, pkcs8Bytes);
   return { encrypted, salt, iv };
 }
+
+export async function importOpenPgpPublicKey(armoredPublicKeyText: string): Promise<any> {
+
+        const readKey = await openpgp.readKey({ armoredKey: armoredPublicKeyText });
+        const info = await extractKeyInfo(readKey);
+        
+        const email = (info.emailAddresses[0] || '').toLowerCase();
+        if (!email) throw new Error('Key has no valid email address associated');
+        
+        const existing = (await listPublicCerts()).some((c) => c.fingerprint === info.fingerprint);
+          if (!existing) {
+              
+        await savePublicCert({
+          id: generateUUID(),
+          email,
+          publicKey: armoredPublicKeyText,
+          issuer: info.issuer,
+          subject: info.subject,
+          notBefore: info.notBefore,
+          notAfter: info.notAfter,
+          fingerprint: info.fingerprint,
+          source: 'manual',
+        });
+      }
+        return email;
+      }

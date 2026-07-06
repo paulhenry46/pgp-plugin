@@ -24,7 +24,7 @@ import { pgpVerify } from './pgp-verify.ts';
 import { pgpDecrypt, normalizePgpMessage, PgpKeyLockedError } from './pgp-decrypt.ts';
 import { detectPgp } from './pgp-detect.ts'; // Remplacement de detectSmime
 import { parseMime } from './mime-parse.ts';
-import { extractKeyInfo } from './pgp-key-utils.ts';
+import { extractKeyInfo, scanAndImportKeysFromAttachments } from './pgp-key-utils.ts';
 import { clearArmoredPrivateKeyToPrivateKey, generateUUID } from './util.ts';
 import {
   saveKeyRecord, listKeyRecords, deleteKeyRecord,
@@ -32,7 +32,7 @@ import {
   saveSessionKeys, getSessionKeys, deleteSessionKeys, clearSessionKeys, KeyRecord, PublicCert
 } from './key-storage.ts';
 
- import { importOpenPgpPrivateKey, unlockPrivateKey } from './pgp-import.ts';
+ import { importOpenPgpPrivateKey, importOpenPgpPublicKey, unlockPrivateKey } from './pgp-import.ts';
 
 // ─── Shared preferences (api.storage; shared across iframes) ──────────
 
@@ -359,29 +359,6 @@ export async function onComposeSend(req: ComposeRequest): Promise<boolean | unde
 
 // ─── Render-body takeover (verify / decrypt) ───────────────────────────
 
-async function maybeAutoImportSigner(status:any) {
-  if (settings().autoImportSignerCerts === false) return;
-  const cert = status && status.signerCert; // On garde .signerCert pour la compatibilité sémantique de l'UI
-  if (!cert || !status.signatureValid || !cert.email) return;
-  try {
-    const existing = (await listPublicCerts()).some((c) => c.fingerprint === cert.fingerprint);
-    if (!existing) {
-      await savePublicCert({
-        id: generateUUID(),
-        email: cert.email,
-        publicKey: cert.publicKey,
-        issuer: cert.issuer,
-        subject: cert.subject,
-        notBefore: cert.notBefore,
-        notAfter: cert.notAfter,
-        fingerprint: cert.fingerprint,
-        source: 'signed-email',
-      });
-    }
-  } catch (err) {
-    host.log.warn('auto-import signer key failed', err);
-  }
-}
 
 function statusNoticeHtml(message: string, tone: string) {
   const color = tone === 'error' ? 'var(--color-destructive, #dc2626)'
@@ -479,6 +456,7 @@ export async function onRenderEmailBody(body: any, ctx: any) {
           };
         }
         const status = { isEncrypted: true, decryptionSuccess: false, decryptionError: String(err) };
+        
         await persistVerifyStatus(ctx.id, status);
         return {
           ...body,
@@ -525,7 +503,7 @@ export async function onRenderEmailBody(body: any, ctx: any) {
              verification.signerEmailMatch = fromEmail.toLowerCase().trim() === verification.signerCert.email;
              
              // Import automatique si configuré
-             await maybeAutoImportSigner(verification);
+             
           } else {
              verification.signatureValid = false;
              verification.signatureError = `Clé publique inconnue ou absente du trousseau (Key ID: ${signerKeyID}).`;
@@ -539,6 +517,9 @@ export async function onRenderEmailBody(body: any, ctx: any) {
       // 4. Continuer le parsing de la structure MIME interne propre
       const parsed = parseMime(innerBytes);
       await persistVerifyStatus(ctx.id, verification);
+      if (parsed.attachments) {
+        await scanAndImportKeysFromAttachments(parsed.attachments);
+      }
       return {
         ...body,
         handledBy: 'openpgp',
@@ -567,10 +548,13 @@ export async function onRenderEmailBody(body: any, ctx: any) {
         console.log('pub certs:' ,knownPublicKeys);
       
       const v = await pgpVerify(new TextEncoder().encode(pgpMessageContent), fromEmail, signatureString, knownPublicKeys);
-      await maybeAutoImportSigner(v.status);
+      
       
       const parsed = parseMime(v.mimeBytes);
       await persistVerifyStatus(ctx.id, v.status);
+      if (parsed.attachments) {
+        await scanAndImportKeysFromAttachments(parsed.attachments);
+      }
       return {
         ...body,
         handledBy: 'openpgp',
@@ -963,24 +947,7 @@ function SettingsSection() {
     setBusy(true);
     try {
       const text = new TextDecoder().decode(await file.arrayBuffer());
-      const openpgp = await import('openpgp');
-      const readKey = await openpgp.readKey({ armoredKey: text });
-      const info = await extractKeyInfo(readKey);
-      
-      const email = (info.emailAddresses[0] || '').toLowerCase();
-      if (!email) throw new Error('Key has no valid email address associated');
-      
-      await savePublicCert({
-        id: generateUUID(),
-        email,
-        publicKey: text,
-        issuer: info.issuer,
-        subject: info.subject,
-        notBefore: info.notBefore,
-        notAfter: info.notAfter,
-        fingerprint: info.fingerprint,
-        source: 'manual',
-      });
+      const email = await importOpenPgpPublicKey(text);
       host.toast.success(`Imported public key for ${email}`);
       if (certFileRef.current) certFileRef.current.value = '';
       await refresh();
