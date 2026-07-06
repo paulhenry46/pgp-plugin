@@ -17,7 +17,8 @@
     "ui:composer-toolbar",
     "ui:email-banner",
     "ui:settings-section",
-    "app:lifecycle"
+    "app:lifecycle",
+    "ui:email-details"
   ],
   "entrypoint": "index.js",
   "minAppVersion": "1.7.6",
