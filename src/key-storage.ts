@@ -15,22 +15,22 @@ const KEY_RECORDS_STORE = 'key-records';
 const PUBLIC_CERTS_STORE = 'public-certs';
 const SESSION_KEYS_STORE = 'session-keys';
 
-// ── Définitions des Interfaces ──────────────────────────────────────
+// ── Interfaces ──────────────────────────────────────
 
 export interface KeyRecord {
   id: string;
   email: string;
   accountId?: string;
   publicKey: string;
-  encryptedPrivateKey: ArrayBuffer; // Corrigé : Format binaire brut AES-GCM
-  salt: ArrayBuffer;                // Ajouté : Requis pour la dérivation PBKDF2 au déverrouillage
-  iv: ArrayBuffer;                  // Ajouté : Requis pour l'initialisation AES-GCM
-  kdfIterations: number;            // Ajouté : Requis pour la cohérence de dérivation
+  encryptedPrivateKey: ArrayBuffer; 
+  salt: ArrayBuffer;                
+  iv: ArrayBuffer;                  
+  kdfIterations: number;            
   issuer: string;
   subject: string;
-  serialNumber: string;             // Équivalent hexadécimal du KeyID PGP
-  notBefore: string;                // Date ISO standardisée
-  notAfter: string | null;          // Date ISO ou null si pas d'expiration
+  serialNumber: string;             
+  notBefore: string;                
+  notAfter: string | null;          
   fingerprint: string;
   algorithm: string;
   capabilities: {
@@ -54,12 +54,12 @@ export interface PublicCert {
 
 export interface SessionKeysEntry {
   id: string; 
-  unlockedPrivateKey: string; // Stocke la clé principale déchiffrée au format ASCII Armored
-  signingKey: string;          // Stocke la sous-clé de signature au format ASCII Armored
-  decryptionKey: string;       // Stocke la sous-clé de déchiffrement au format ASCII Armored
+  unlockedPrivateKey: string; // ASCII Armored
+  signingKey: string;          // ASCII Armored
+  decryptionKey: string;       // ASCII Armored
 }
 
-// ── Moteur de Base de Données ───────────────────────────────────────
+// ── BDD ENGINE ───────────────────────────────────────
 
 function openDB(): Promise<IDBDatabase> {
   return new Promise((resolve, reject) => {
@@ -88,7 +88,7 @@ function openDB(): Promise<IDBDatabase> {
 }
 
 /**
- * Encapsule une opération de transaction dans une promesse typée.
+ * Encapsulate operation in promise.
  */
 function txPromise<T>(
   db: IDBDatabase, 

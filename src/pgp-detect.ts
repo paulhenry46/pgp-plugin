@@ -1,6 +1,5 @@
 /**
  * Detect OpenPGP content in an email message.
- * Replaces the legacy S/MIME implementation.
  * Checks Content-Type, JMAP bodyStructure, attachment metadata, and inline text.
  */
 
@@ -15,7 +14,7 @@ export interface PgpDetectionResult {
 export function detectPgp(contentType: string, bodyStructure: any, attachments: any[], textBody: string): PgpDetectionResult {
   const noResult: PgpDetectionResult = { type: null, supported: false };
 
-  // 1. Détection du mode PGP INLINE (Corps textuel brut)
+  // 1. Detection of PGP INLINE mode (Plain text body)
   if (textBody && typeof textBody === 'string') {
     if (textBody.includes('-----BEGIN PGP MESSAGE-----')) {
       return { type: 'pgp-inline-encrypted', supported: true };
@@ -25,7 +24,7 @@ export function detectPgp(contentType: string, bodyStructure: any, attachments: 
     }
   }
 
-  // 2. Détection via le Content-Type principal (PGP/MIME - RFC 3156)
+  // 2. Detection via main Content-Type (PGP/MIME - RFC 3156)
   if (contentType) {
     const ct = contentType.toLowerCase();
 
@@ -33,7 +32,7 @@ export function detectPgp(contentType: string, bodyStructure: any, attachments: 
       const part = findPgpMimePart(bodyStructure, 'application/octet-stream');
       return { 
         type: 'pgp-mime-encrypted', 
-        blobId: bodyStructure?.blobId || part?.blobId, // On préfère le blob global pour le déchiffrement complet
+        blobId: bodyStructure?.blobId || part?.blobId, // We prefer the global blob for full decryption
         partId: part?.partId, 
         supported: true 
       };
@@ -41,7 +40,7 @@ export function detectPgp(contentType: string, bodyStructure: any, attachments: 
 
     if (ct.includes('multipart/signed') && ct.includes('protocol="application/pgp-signature"')) {
       const sigPart = findPgpMimePart(bodyStructure, 'application/pgp-signature');
-      // En PGP/MIME signé, le blobId principal (le contenu à vérifier) est souvent le premier enfant du multipart
+      // In signed PGP/MIME, the main blobId (the content to verify) is often the first child of the multipart
       const contentPart = bodyStructure?.subParts?.[0]; 
       return { 
         type: 'pgp-mime-signed', 
@@ -53,13 +52,13 @@ export function detectPgp(contentType: string, bodyStructure: any, attachments: 
     }
   }
 
-  // 3. Détection en parcourant l'arborescence structurelle JMAP / MIME
+  // 3. Detection by traversing the JMAP / MIME structural tree
   if (bodyStructure) {
     const result = walkBodyStructure(bodyStructure);
     if (result) return result;
   }
 
-  // 4. Détection via les pièces jointes (fichiers .asc, .pgp, .sig)
+  // 4. Detection via attachments (.asc, .pgp, .sig files)
   if (attachments) {
     for (const att of attachments) {
       const type = att.type?.toLowerCase() || '';
@@ -72,7 +71,7 @@ export function detectPgp(contentType: string, bodyStructure: any, attachments: 
         return { type: 'pgp-mime-signed', blobId: att.blobId, partId: att.partId, signatureBlobId: att.blobId, supported: true };
       }
       
-      // Fallback par extension de fichier
+      // Fallback by file extension
       if (name.endsWith('.pgp') || name.endsWith('.asc')) {
         return { type: 'pgp-encrypted-file', blobId: att.blobId, partId: att.partId, supported: true };
       }
@@ -86,14 +85,14 @@ export function detectPgp(contentType: string, bodyStructure: any, attachments: 
 }
 
 /**
- * Parcourt récursivement l'arborescence des parties de l'e-mail
- * Aligné pour retourner un PgpDetectionResult valide
+ * Recursively traverses the tree of email parts
+ * Aligned to return a valid PgpDetectionResult
  */
 function walkBodyStructure(part: any): PgpDetectionResult | null {
   if (!part) return null;
   const type = part.type?.toLowerCase() || '';
 
-  // Cas direct : La partie elle-même est du contenu PGP
+  // Direct case: The part itself is PGP content
   if (type.includes('application/pgp-encrypted')) {
     return { type: 'pgp-mime-encrypted', blobId: part.blobId, partId: part.partId, supported: true };
   }
@@ -101,7 +100,7 @@ function walkBodyStructure(part: any): PgpDetectionResult | null {
     return { type: 'pgp-mime-signed', blobId: part.blobId, partId: part.partId, signatureBlobId: part.blobId, supported: true };
   }
 
-  // Cas conteneur : Gestion des structures multiparts imbriquées
+  // Container case: Handling nested multipart structures
   if (type === 'multipart/encrypted' || type === 'multipart/signed') {
     const subParts = part.subParts || [];
     
@@ -120,8 +119,8 @@ function walkBodyStructure(part: any): PgpDetectionResult | null {
           supported: true 
         };
       } else {
-        // multipart/signed : Séparation obligatoire du contenu et de sa signature détachée
-        const contentPart = subParts[0]; // Généralement l'enveloppe de texte/html à signer
+        // multipart/signed: Mandatory separation of content and its detached signature
+        const contentPart = subParts[0]; // Usually the text/html envelope to be signed
         const signaturePart = subParts.find((sp: any) => sp.type?.toLowerCase().includes('application/pgp-signature'));
         return {
           type: 'pgp-mime-signed',
@@ -134,7 +133,7 @@ function walkBodyStructure(part: any): PgpDetectionResult | null {
     }
   }
 
-  // Descente récursive dans l'arbre JMAP
+  // Recursive descent in the JMAP tree
   if (part.subParts) {
     for (const sub of part.subParts) {
       const result = walkBodyStructure(sub);
@@ -146,7 +145,7 @@ function walkBodyStructure(part: any): PgpDetectionResult | null {
 }
 
 /**
- * Trouve la sous-partie spécifique correspondant au protocole PGP demandé
+ * Finds the specific sub-part corresponding to the requested PGP protocol
  */
 function findPgpMimePart(bodyStructure: any, protocolType: string): any | null {
   if (!bodyStructure) return null;

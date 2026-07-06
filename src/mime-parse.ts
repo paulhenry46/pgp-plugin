@@ -43,8 +43,8 @@ interface OutputCollector {
 export function parseMime(bytes: Uint8Array): ParseMimeResult {
   const text = binaryString(bytes);
   
-  // ── Cas Spécifique PGP Inline ──────────────────────────────────────
-  // Si le payload brut reçu contient directement un bloc PGP chiffré ou signé de manière textuelle
+  // ── Specific PGP Inline Case ──────────────────────────────────────
+  // If the raw payload received directly contains a PGP encrypted or signed text block
   if (text.includes('-----BEGIN PGP MESSAGE-----') || text.includes('-----BEGIN PGP SIGNED MESSAGE-----')) {
     return parsePgpInline(text);
   }
@@ -53,16 +53,16 @@ export function parseMime(bytes: Uint8Array): ParseMimeResult {
   const out: OutputCollector = { html: '', text: '', attachments: [], pgpSignatureBlock: null };
   collect(node, out);
   
-  // Nettoyage : Si une pièce jointe est la signature PGP détachée (PGP/MIME),
-  // on l'extrait de la liste pour la mettre dans un champ dédié de l'application.
+  // Cleanup: If an attachment is the detached PGP signature (PGP/MIME),
+  // we extract it from the list to put it in a dedicated field in the application.
   const sigIndex = out.attachments.findIndex(att => 
     att.type === 'application/pgp-signature' || att.name === 'signature.asc'
   );
   if (sigIndex !== -1) {
     const sigAttachment = out.attachments[sigIndex];
-    // Reconvertit l'URL Data en chaîne texte pour l'API openpgp.verify()
+    // Reconverts the Data URL to text string for the openpgp.verify() API
     out.pgpSignatureBlock = dataUrlToText(sigAttachment.dataUrl);
-    out.attachments.splice(sigIndex, 1); // Retire des pièces jointes affichées
+    out.attachments.splice(sigIndex, 1); // Removes from displayed attachments
   }
 
   // Fallback for non-MIME inner content
@@ -73,9 +73,9 @@ export function parseMime(bytes: Uint8Array): ParseMimeResult {
   return out;
 }
 
-/** Traite un bloc de texte brut contenant du PGP sans structure MIME complexe */
+/** Handles a plain text block containing PGP without complex MIME structure */
 function parsePgpInline(rawText: string): ParseMimeResult {
-  // Supprime les bruits d'en-têtes de transport HTTP/SMTP résiduels si présents
+  // Removes residual HTTP/SMTP transport header noise if present
   const cleanText = rawText.trim();
   return {
     html: '',
@@ -246,7 +246,7 @@ function bytesToDataUrl(bytes: Uint8Array, type: string): string {
   return `data:${type};base64,${btoa(binary)}`;
 }
 
-/** Helper pour décoder l'URL Data de la signature en texte clair pour OpenPGP */
+/** Helper to decode the signature Data URL to plain text for OpenPGP */
 function dataUrlToText(dataUrl: string): string | null {
   try {
     const base64Str = dataUrl.split(',')[1];

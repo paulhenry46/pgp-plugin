@@ -6,30 +6,30 @@
 import * as openpgp from 'openpgp';
 
 /**
- * Chiffre un contenu MIME ou textuel pour un ou plusieurs destinataires.
- * Inclut automatiquement la clé publique de l'expéditeur (sender) pour lui permettre
- * de relire ses propres messages dans le dossier "Messages envoyés".
- * * @param {Uint8Array} mimeBytes - Les octets du message à chiffrer.
- * @param {string[]} recipientPublicKeysArmored - Liste des clés publiques des destinataires (format ASCII Armored).
- * @param {string} senderPublicKeyArmored - Clé publique de l'expéditeur (format ASCII Armored).
- * @param {boolean} useAes128 - Si true, force AES-128, sinon utilise le standard AES-256.
- * @returns {Promise<Blob>} Un blob contenant le message chiffré au format ASCII Armored.
+ * Encrypts MIME or text content for one or more recipients.
+ * Automatically includes the sender's public key (sender) to allow them
+ * to read back their own messages in the "Sent" folder.
+ * @param {Uint8Array} mimeBytes - The bytes of the message to encrypt.
+ * @param {string[]} recipientPublicKeysArmored - List of recipient public keys (ASCII Armored format).
+ * @param {string} senderPublicKeyArmored - Sender's public key (ASCII Armored format).
+ * @param {boolean} useAes128 - If true, forces AES-128, otherwise uses standard AES-256.
+ * @returns {Promise<Blob>} A blob containing the encrypted message in ASCII Armored format.
  */
 export async function pgpEncrypt(
   mimeBytes: Uint8Array, 
   recipientPublicKeysArmored: string[], 
   senderPublicKeyArmored: string,
-  signingKey?: openpgp.PrivateKey // <-- Paramètre optionnel ajouté pour la signature combinée
+  signingKey?: openpgp.PrivateKey // <-- Optional parameter added for combined signature
 ): Promise<Blob> {
   
-  // 1. Fusion et dédoublonnement des clés publiques
+  // 1. Merging and deduplication of public keys
   const allKeyStrings = deduplicateKeys([...recipientPublicKeysArmored, senderPublicKeyArmored]);
   
   if (allKeyStrings.length === 0) {
-    throw new Error('Aucune clé publique de destinataire ou d’expéditeur fournie.');
+    throw new Error('No recipient or sender public key provided.');
   }
 
-  // 2. Parsing des clés pour l'API OpenPGP
+  // 2. Parsing keys for OpenPGP API
   const encryptionKeys: openpgp.PublicKey[] = [];
   
   for (const keyArmored of allKeyStrings) {
@@ -37,21 +37,21 @@ export async function pgpEncrypt(
       const parsedKey = await openpgp.readKey({ armoredKey: keyArmored });
       encryptionKeys.push(parsedKey);
     } catch (e: any) {
-      console.warn(`Impossible de lire une clé publique, elle sera ignorée: ${e.message}`);
+      console.warn(`Unable to read a public key, it will be ignored: ${e.message}`);
     }
   }
 
   if (encryptionKeys.length === 0) {
-    throw new Error('Échec du parsing de toutes les clés publiques fournies.');
+    throw new Error('Failed to parse all provided public keys.');
   }
 
-  // 3. Préparation du payload binaire
+  // 3. Preparation of binary payload
   const message = await openpgp.createMessage({ binary: mimeBytes });
 
-  // 4. Configuration de l'algorithme symétrique (Session Key)
+  // 4. Configuration of symmetric algorithm (Session Key)
   const algorithm = openpgp.enums.symmetric.aes256;
 
-  // 5. Configuration dynamique de l'objet d'options pour openpgp.encrypt
+  // 5. Dynamic configuration of options object for openpgp.encrypt
   const encryptOptions: any = {
     message,
     encryptionKeys,
@@ -60,24 +60,24 @@ export async function pgpEncrypt(
     }
   };
 
-  // Si une clé de signature est passée, on l'ajoute dans les options.
-  // OpenPGP.js s'occupe alors de signer le payload binaire en interne avant de le chiffrer.
+  // If a signing key is passed, we add it to the options.
+  // OpenPGP.js then takes care of signing the binary payload internally before encrypting it.
   if (signingKey) {
     encryptOptions.signingKeys = signingKey;
   }
 
-  // 6. Chiffrement de bout en bout
+  // 6. End-to-end encryption
   const encryptedArmored = await openpgp.encrypt(encryptOptions);
 
   console.log('message:', message);
   console.log('message encrypted:', encryptedArmored);
   
-  // 7. Retourne un Blob texte au format standard OpenPGP chiffré
+  // 7. Returns a text Blob in standard encrypted OpenPGP format
   return new Blob([encryptedArmored as string], { type: 'application/pgp-encrypted; charset=utf-8' });
 }
 
 /**
- * Dédoublonne les chaînes de clés blindées pour éviter de chiffrer deux fois pour la même clé
+ * Deduplicates armored key strings to avoid encrypting twice for the same key
  */
 function deduplicateKeys(keys: string[]): string[] {
   const seen = new Set();

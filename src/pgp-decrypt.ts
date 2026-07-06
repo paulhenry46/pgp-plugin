@@ -4,7 +4,7 @@
  */
 
 import * as openpgp from 'openpgp';
-import {KeyRecord} from './key-storage.ts'; // Importez l'interface KeyRecord générée à l'étape précédente
+import {KeyRecord} from './key-storage.ts'; // Import the KeyRecord interface generated in the previous step
 import { clearArmoredPrivateKeyToPrivateKey } from './util.ts';
 
 export class PgpKeyLockedError extends Error {
@@ -17,22 +17,22 @@ export class PgpKeyLockedError extends Error {
 }
 
 /**
- * Tente de déchiffrer un message OpenPGP.
+ * Attempts to decrypt an OpenPGP message.
  * @param {Object} input
- * @param {Uint8Array} input.cmsBytes - Les octets du message chiffré OpenPGP.
- * @param {Array} input.keyRecords - Les métadonnées des clés privées de l'utilisateur issues d'IndexedDB.
- * @param {Map} input.unlockedKeys - Map (keyRecordId -> openpgp.PrivateKey déverrouillée) pour cette session.
+ * @param {Uint8Array} input.cmsBytes - The bytes of the encrypted OpenPGP message.
+ * @param {Array} input.keyRecords - Metadata of the user's private keys from IndexedDB.
+ * @param {Map} input.unlockedKeys - Map (keyRecordId -> unlocked openpgp.PrivateKey) for this session.
  * @returns {Promise<{ mimeBytes: Uint8Array, keyRecordId: string }>}
  */
 export async function pgpDecrypt(input: { 
   cmsBytes: Uint8Array, 
   keyRecords: KeyRecord[], 
   unlockedKeys: Map<string, string>,
-  knownPublicKeys?: openpgp.PublicKey[] // 💡 Ajout des clés publiques de vérification
+  knownPublicKeys?: openpgp.PublicKey[] //  public keys for verification (signing)
 }) {
   const { cmsBytes, keyRecords, unlockedKeys, knownPublicKeys = [] } = input;
 
-  // 1. Normalisation de la charge utile d'entrée
+  // 1. Normalization of the input payload
   console.log('[plugin:smime] : CmsBytes :', cmsBytes);
   const armoredMessage = normalizePgpMessage(cmsBytes);
   console.log('[plugin:smime] : armored :', armoredMessage);
@@ -40,58 +40,56 @@ export async function pgpDecrypt(input: {
   try {
     parsedMessage = await openpgp.readMessage({ armoredMessage });
   } catch (e) {
-    throw new Error('Impossible de parser le message OpenPGP : ' + (e instanceof Error ? e.message : String(e)));
+    throw new Error('Unable to parse the OpenPGP message: ' + (e instanceof Error ? e.message : String(e)));
   }
 
-  // 2. Détermination des candidats capables de déchiffrer le message
+  // 2. Determination of candidates capable of decrypting the message
   const matchedRecords = await findMatchingKeyRecords(parsedMessage, keyRecords);
   if (matchedRecords.length === 0) {
-    throw new Error("Aucune clé OpenPGP importée ne correspond aux destinataires de ce message chiffré.");
+    throw new Error("No imported OpenPGP key matches the recipients of this encrypted message.");
   }
 
-  // 3. Tentative de déchiffrement avec les clés actuellement déverrouillées en session
+  // 3. Attempt to decrypt with currently unlocked keys in session
   for (const keyRecord of matchedRecords) {
     const unlockedPrivateKey = unlockedKeys.get(keyRecord.id);
-    if (!unlockedPrivateKey) continue; // La clé correspond mais est verrouillée
+    if (!unlockedPrivateKey) continue; // The key matches but is locked
 
     try {
-      console.log(`Tentative de déchiffrement avec la clé ${keyRecord.id}...`); 
+      console.log(`Attempt to decrypt with key ${keyRecord.id}...`); 
       
-      // 💡 On récupère 'signatures' en plus de 'data' depuis le résultat d'openpgp.decrypt
       const { data: decryptedBytes, signatures } = await openpgp.decrypt({
         message: parsedMessage,
         decryptionKeys: await clearArmoredPrivateKeyToPrivateKey(unlockedPrivateKey),
-        verificationKeys: knownPublicKeys, // 💡 Passage des clés publiques pour la signature imbriquée
+        verificationKeys: knownPublicKeys, // 💡 Passing public keys for nested signature
         format: 'binary'
       });
       console.log('signature:', signatures);
-      // 💡 On retourne les signatures avec le résultat
       return { 
         mimeBytes: decryptedBytes, 
         keyRecordId: keyRecord.id,
         signatures: signatures 
       };
     } catch (e) {
-      console.warn(`Échec de déchiffrement avec la clé ${keyRecord.id}, tentative suivante...`, e);
+      console.warn(`Failed to decrypt with key ${keyRecord.id}, trying next...`, e);
       continue;
     }
   }
 
-  // 4. Gestion des clés verrouillées
+  // 4. Handling locked keys
   const lockedRecord = (await matchedRecords).find((record:any) => !unlockedKeys.has(record.id));
   if (lockedRecord) {
     throw new PgpKeyLockedError(
-      'La clé PGP est verrouillée. Veuillez saisir votre phrase de passe pour déchiffrer.',
+      'The PGP key is locked. Please enter your passphrase to decrypt.',
       lockedRecord.id,
     );
   }
 
-  throw new Error('Échec du déchiffrement du message avec les clés disponibles.');
+  throw new Error('Failed to decrypt the message with available keys.');
 }
 
 /**
- * Identifie quels ID de enregistrements locaux (keyRecords) sont requis pour ce message.
- * Utile pour déclencher l'affichage des pop-ups de déverrouillage dans l'UI.
+ * Identifies which local record IDs (keyRecords) are required for this message.
+ * Useful for triggering the display of unlock pop-ups in the UI.
  */
 export async function findDecryptionCandidates(cmsBytes: Uint8Array, keyRecords: KeyRecord[]) {
   try {
@@ -105,8 +103,8 @@ export async function findDecryptionCandidates(cmsBytes: Uint8Array, keyRecords:
 }
 
 /**
- * Filtre les keyRecords de l'utilisateur pour trouver ceux dont le Key ID correspond
- * à l'un des Key IDs cibles intégrés dans les paquets du message PGP.
+ * Filters the user's keyRecords to find those whose Key ID matches
+ * one of the target Key IDs embedded in the packets of the PGP message.
  */
 
 
@@ -114,7 +112,7 @@ export async function findMatchingKeyRecords(
   parsedMessage: openpgp.Message<string> | openpgp.Message<Uint8Array>, 
   keyRecords: KeyRecord[]
 ): Promise<KeyRecord[]> {
-  // 1. Extraire les Key IDs (en hexadécimal majuscule) qui ont servi à chiffrer le message
+  // 1. Extract the Key IDs (in uppercase hexadecimal) used to encrypt the message
   const encryptionKeyIds = parsedMessage.getEncryptionKeyIDs().map(id => id.toHex().toUpperCase());
   
   const matches: KeyRecord[] = [];
@@ -123,18 +121,18 @@ export async function findMatchingKeyRecords(
     if (!record.publicKey) continue;
 
     try {
-      // 2. Parser la clé publique stockée pour obtenir ses véritables Key IDs (clé principale + sous-clés)
+      // 2. Parse the stored public key to get its true Key IDs (main key + subkeys)
       const keyInstance = await openpgp.readKey({ armoredKey: record.publicKey });
       const recordKeyIds = keyInstance.getKeyIDs().map(id => id.toHex().toUpperCase());
 
-      // 3. Vérifier si l'un des Key IDs de cette clé correspond à ceux demandés par le message chiffré
+      // 3. Check if one of this key's Key IDs matches those required by the encrypted message
       const hasMatch = recordKeyIds.some(id => encryptionKeyIds.includes(id));
 
       if (hasMatch) {
         matches.push(record);
       }
     } catch (err) {
-      // On ignore une clé mal formée dans le stockage pour ne pas bloquer le reste de la boucle
+      // We ignore a malformed key in storage to not block the rest of the loop
       console.error(`Failed to parse public key for record ${record.id}:`, err);
     }
   }
@@ -143,8 +141,8 @@ export async function findMatchingKeyRecords(
 }
 
 /**
- * Nettoie et normalise l'entrée (qui peut être du binaire ou une chaîne malmenée par le transport JMAP)
- * pour restituer un bloc ASCII Armored OpenPGP propre.
+ * Cleans and normalizes the input (which can be binary or a string corrupted by JMAP transport)
+ * to restore a clean ASCII Armored OpenPGP block.
  */
 export function normalizePgpMessage(raw: Uint8Array | string): string {
   if (!raw || (typeof raw === 'string' && raw.trim() === '')) return '';
@@ -156,8 +154,8 @@ export function normalizePgpMessage(raw: Uint8Array | string): string {
     return text;
   }
 
-  // Fallback au cas où le blindage ASCII a été dépouillé mais que les données restent du Base64 brut
-  // Extrait le bloc base64 et ré-encapsule avec les en-têtes standard OpenPGP
+  // Fallback in case the ASCII armor was stripped but the data remains raw Base64
+  // Extracts the base64 block and re-encapsulates with standard OpenPGP headers
   const cleanedBase64 = text.replace(/[^A-Za-z0-9+/=]/g, '');
   if (cleanedBase64.length > 32) {
     return `-----BEGIN PGP MESSAGE-----\n\n${cleanedBase64}\n-----END PGP MESSAGE-----`;

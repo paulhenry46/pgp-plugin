@@ -9,7 +9,7 @@ import { importOpenPgpPublicKey } from './pgp-import.ts';
 // ── Helpers & Conversions ───────────────────────────────────────────
 
 /**
- * Vérifie si la chaîne de caractères ressemble à un bloc OpenPGP blindé (Armored).
+ * Checks if the string looks like an Armored OpenPGP block.
  * @param {string} data 
  * @returns {boolean}
  */
@@ -21,7 +21,7 @@ export function isPem(data: string): boolean {
 // ── Key Parsing ─────────────────────────────────────────────────────
 
 /**
- * Parse un bloc de clé publique ou privée OpenPGP (Armored ou binaire).
+ * Parses a public or private OpenPGP key block (Armored or binary).
  * @param {string|Uint8Array} data 
  * @returns {Promise<openpgp.PublicKey|openpgp.PrivateKey>}
  */
@@ -30,21 +30,21 @@ export async function parsePgpKey(data: string | Uint8Array): Promise<openpgp.Pu
   const input = isString ? data : new TextDecoder().decode(data);
 
   try {
-    // On essaie d'abord de lire comme une clé privée, puis comme publique
+    // First try to read as a private key, then as public
     if (input.includes('PRIVATE KEY BLOCK')) {
       return await openpgp.readPrivateKey({ armoredKey: input });
     } else {
       return await openpgp.readKey({ armoredKey: input });
     }
   } catch (e) {
-    throw new Error(`Échec du parsing de la clé OpenPGP : ${e instanceof Error ? e.message : String(e)}`);
+    throw new Error(`Failed to parse OpenPGP key: ${e instanceof Error ? e.message : String(e)}`);
   }
 }
 
 // ── Metadata Extraction ──────────────────────────────────────────────
 
 /**
- * Extrait l'algorithme sous forme lisible (ex: RSA-4096, ECC-p256...)
+ * Extracts the algorithm in readable form (e.g., RSA-4096, ECC-p256...)
  * @param {openpgp.PublicKey|openpgp.PrivateKey} key 
  * @returns {string}
  */
@@ -54,14 +54,14 @@ function extractAlgorithm(key: openpgp.PublicKey | openpgp.PrivateKey): string {
     if (info.bits) {
       return `${info.algorithm.toUpperCase()}-${info.bits}`;
     }
-    return info.algorithm.toUpperCase(); // Pour ECC (Curve25519, p256...)
+    return info.algorithm.toUpperCase(); // For ECC (Curve25519, p256...)
   } catch {
     return 'UNKNOWN';
   }
 }
 
 /**
- * Parcourt les User IDs d'une clé pour en extraire toutes les adresses e-mail valides.
+ * Traverses the User IDs of a key to extract all valid email addresses.
  * @param {openpgp.Key} key 
  * @returns {string[]}
  */
@@ -83,35 +83,35 @@ function extractEmailAddresses(key: openpgp.PublicKey | openpgp.PrivateKey): str
 type KeyCapabilities = { canSign: boolean; canEncrypt: boolean };
 
 /**
- * Détermine les capacités d'une clé (Chiffrement / Signature) en inspectant ses paquets.
+ * Determines the capabilities of a key (Encryption / Signature) by inspecting its packets.
  */
 export function classifyCapabilities(key: openpgp.PublicKey | openpgp.PrivateKey): KeyCapabilities {
   let canSign = false;
   let canEncrypt = false;
 
   try {
-    // 1. Détection de la capacité de signature
-    // On passe par l'objet d'instance (as any) pour appeler l'utilitaire interne canSign()
-    // ou on vérifie si la clé possède des composants capables de signer.
+    // 1. Detection of signature capability
+    // Pass through the instance object (as any) to call the internal canSign() utility
+    // or check if the key has components capable of signing.
     if (typeof (key as any).canSign === 'function') {
       canSign = (key as any).canSign();
     } else {
-      // Alternative de secours via les drapeaux du paquet principal
+      // Fallback via the flags of the main packet
       canSign = !!key.keyPacket.algorithm; 
     }
 
-    // 2. Détection de la capacité de chiffrement
-    // Si la méthode interne ou l'accès au paquet de chiffrement existe, canEncrypt est vrai.
+    // 2. Detection of encryption capability
+    // If the internal method or access to the encryption packet exists, canEncrypt is true.
     if (typeof (key as any).getEncryptionKeyPacket === 'function') {
       canEncrypt = true;
     }
   } catch {
-    // En cas d'échec de lecture des structures internes
+    // In case of failure reading internal structures
     canSign = false;
     canEncrypt = false;
   }
 
-  // Fallback historique si l'analyse des paquets échoue mais que l'algorithme est du RSA
+  // Historical fallback if packet analysis fails but the algorithm is RSA
   if (!canSign && !canEncrypt) {
     try {
       const algName = String((key as any).getAlgorithmInfo?.().algorithm || '').toLowerCase();
@@ -120,7 +120,7 @@ export function classifyCapabilities(key: openpgp.PublicKey | openpgp.PrivateKey
         canEncrypt = true;
       }
     } catch {
-      // Ignorer
+      // Ignore
     }
   }
 
@@ -128,15 +128,15 @@ export function classifyCapabilities(key: openpgp.PublicKey | openpgp.PrivateKey
 }
 
 /**
- * Extrait la structure complète des métadonnées pour correspondre aux attentes du plugin.
- * Inclut la propriété 'armoredPublicKey' requise pour l'importation de clé.
+ * Extracts the complete metadata structure to match the plugin's expectations.
+ * Includes the 'armoredPublicKey' property required for key import.
  */
 export async function extractKeyInfo(key: openpgp.PublicKey | openpgp.PrivateKey) {
   console.log(key);
   const fingerprint = key.getFingerprint();
   const keyID = key.getKeyID().toHex().toUpperCase();
   
-  // Résolution sécurisée de la fonction externe extractEmailAddresses
+  // Safe resolution of the external extractEmailAddresses function
   const emails: string[] = extractEmailAddresses(key);
     
   const capabilities = classifyCapabilities(key);
@@ -144,7 +144,7 @@ export async function extractKeyInfo(key: openpgp.PublicKey | openpgp.PrivateKey
   const primaryUser = await key.getPrimaryUser();
   const subject = primaryUser?.user?.userID?.userID || emails[0] || 'Unknown PGP User';
 
-  // Normalisation des types temporels (Date | number) retournés par OpenPGP.js
+  // Normalization of temporal types (Date | number) returned by OpenPGP.js
   const creationTimeRaw = key.getCreationTime();
   const creationDate = creationTimeRaw instanceof Date ? creationTimeRaw : new Date(creationTimeRaw);
 
@@ -156,11 +156,11 @@ export async function extractKeyInfo(key: openpgp.PublicKey | openpgp.PrivateKey
     expirationIso = expirationDate.toISOString();
   }
 
-  // Formatage du fingerprint par blocs de 4 caractères séparés par des deux-points
+  // Format fingerprint by blocks of 4 characters separated by colons
   const fingerprintMatches = fingerprint.match(/.{1,4}/g);
   const formattedFingerprint = fingerprintMatches ? fingerprintMatches.join(':') : fingerprint;
 
-  // Extraction du nom de l'algorithme via l'objet d'instance
+  // Extract algorithm name via instance object
   let algorithmName = 'Unknown';
   try {
     if (typeof (key as any).getAlgorithmInfo === 'function') {
@@ -170,10 +170,10 @@ export async function extractKeyInfo(key: openpgp.PublicKey | openpgp.PrivateKey
     // Fallback
   }
 
-  // Extraction et génération sécurisée du bloc Armored de la clé publique
+  // Secure extraction and generation of the Armored public key block
   let armoredPublicKey = '';
   try {
-    // Si c'est une clé privée, on extrait sa partie publique avec .toPublic()
+    // If it's a private key, extract its public part with .toPublic()
     const publicKeyInstance = key.isPrivate() ? (key as openpgp.PrivateKey).toPublic() : key;
     armoredPublicKey = publicKeyInstance.armor();
   } catch (err) {
@@ -192,16 +192,16 @@ export async function extractKeyInfo(key: openpgp.PublicKey | openpgp.PrivateKey
     extendedKeyUsage: [],
     emailAddresses: emails,
     capabilities,
-    armoredPublicKey, // Ajout de la propriété attendue par pgp-import.ts
+    armoredPublicKey, // Add property expected by pgp-import.ts
   };
 }
 
-// 💡 NOUVEAU : Scan des pièces jointes du message décapsulé
-  export async function scanAndImportKeysFromAttachments(attachments: any[]) {
+//  Scan of attachments from the decapsulated message
+export async function scanAndImportKeysFromAttachments(attachments: any[]) {
     if (!attachments || attachments.length === 0) return;
-    console.log(`[PGP] Scan des pièces jointes pour les clés PGP`, attachments);
+    console.log(`[PGP] Scanning attachments for PGP keys`, attachments);
     for (const att of attachments) {
-      // On cible les extensions courantes de clés publiques PGP ou le type MIME armor
+      // Target common extensions of PGP public keys or armor MIME type
       const isKeyExtension = att.name && (
         att.name.endsWith('.asc') || 
         att.name.endsWith('.key') || 
@@ -216,13 +216,13 @@ export async function extractKeyInfo(key: openpgp.PublicKey | openpgp.PrivateKey
         try {
           let contentStr = '';
 
-          // Si le framework extrait déjà le contenu textuel ou les bytes de la pièce jointe :
+          // If the framework already extracts the text content or bytes of the attachment:
           if (att.content) {
             contentStr = typeof att.content === 'string' 
               ? att.content 
               : new TextDecoder().decode(att.content);
           } 
-          // Sinon, si on doit aller chercher les bytes du sous-blob de la pièce jointe via l'hôte :
+          // Otherwise, if we need to fetch the bytes of the attachment sub-blob via the host:
           else if (att.blobId) {
             const blobBytes = await host.jmap.fetchBlob(att.blobId);
             contentStr = new TextDecoder().decode(blobBytes);
@@ -230,13 +230,13 @@ export async function extractKeyInfo(key: openpgp.PublicKey | openpgp.PrivateKey
           else if (att.dataUrl) {
           const dataUrlStr = String(att.dataUrl);
           
-          // On vérifie si la chaîne utilise l'encodage base64
+          // Check if the string uses base64 encoding
           if (dataUrlStr.includes(';base64,')) {
             const base64Part = dataUrlStr.split(';base64,')[1];
             if (base64Part) {
-              // Décodage de la chaîne Base64 en chaîne de caractères binaire
+              // Decode Base64 string to binary string
               const decodedBinary = atob(base64Part.trim());
-              // Utilisation de TextDecoder pour s'assurer du respect de l'UTF-8
+              // Use TextDecoder to ensure UTF-8 compliance
               const bytes = new Uint8Array(decodedBinary.length);
               for (let i = 0; i < decodedBinary.length; i++) {
                 bytes[i] = decodedBinary.charCodeAt(i);
@@ -244,7 +244,7 @@ export async function extractKeyInfo(key: openpgp.PublicKey | openpgp.PrivateKey
               contentStr = new TextDecoder().decode(bytes);
             }
           } else if (dataUrlStr.includes(',')) {
-            // Si c'est un dataUrl brut sans base64 (ex: data:text/plain,texte...)
+            // If it's a raw dataUrl without base64 (e.g., data:text/plain,text...)
             const rawPart = dataUrlStr.split(',')[1];
             if (rawPart) {
               contentStr = decodeURIComponent(rawPart);
@@ -252,21 +252,21 @@ export async function extractKeyInfo(key: openpgp.PublicKey | openpgp.PrivateKey
           }
         }
 
-          // Si le fichier contient bien l'armure standard, on tente l'import
+          // If the file contains the standard armor, attempt import
           if (contentStr && contentStr.includes('-----BEGIN PGP PUBLIC KEY BLOCK-----')) {
             await maybeAutoImportSigner(contentStr);
           }
         } catch (attErr) {
-          host.log.warn(`[PGP] Échec de la lecture de la pièce jointe ${att.name}`, attErr);
+          host.log.warn(`[PGP] Failed to read attachment ${att.name}`, attErr);
         }
       }
     }
-  };
+};
 
 async function maybeAutoImportSigner(pub:string) {
   console.log('maybeAutoImportSigner', pub);
   if (host.plugin?.settings?.autoImportSignerCerts === false) return;
-  const cert = pub; // On garde .signerCert pour la compatibilité sémantique de l'UI
+  const cert = pub; // Keep .signerCert for UI semantic compatibility
  
   try {
      const email =  await importOpenPgpPublicKey(cert);
