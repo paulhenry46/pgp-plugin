@@ -24,13 +24,18 @@ export class PgpKeyLockedError extends Error {
  * @param {Map} input.unlockedKeys - Map (keyRecordId -> openpgp.PrivateKey déverrouillée) pour cette session.
  * @returns {Promise<{ mimeBytes: Uint8Array, keyRecordId: string }>}
  */
-export async function pgpDecrypt(input: { cmsBytes: Uint8Array, keyRecords: KeyRecord[], unlockedKeys: Map<string, string> }) {
-  const { cmsBytes, keyRecords, unlockedKeys } = input;
+export async function pgpDecrypt(input: { 
+  cmsBytes: Uint8Array, 
+  keyRecords: KeyRecord[], 
+  unlockedKeys: Map<string, string>,
+  knownPublicKeys?: openpgp.PublicKey[] // 💡 Ajout des clés publiques de vérification
+}) {
+  const { cmsBytes, keyRecords, unlockedKeys, knownPublicKeys = [] } = input;
 
   // 1. Normalisation de la charge utile d'entrée
-  console.log('[plugin:smime] : CmsBytes :' ,cmsBytes);
+  console.log('[plugin:smime] : CmsBytes :', cmsBytes);
   const armoredMessage = normalizePgpMessage(cmsBytes);
-  console.log('[plugin:smime] : armored :' ,armoredMessage);
+  console.log('[plugin:smime] : armored :', armoredMessage);
   let parsedMessage: openpgp.Message<string>;
   try {
     parsedMessage = await openpgp.readMessage({ armoredMessage });
@@ -47,29 +52,32 @@ export async function pgpDecrypt(input: { cmsBytes: Uint8Array, keyRecords: KeyR
   // 3. Tentative de déchiffrement avec les clés actuellement déverrouillées en session
   for (const keyRecord of matchedRecords) {
     const unlockedPrivateKey = unlockedKeys.get(keyRecord.id);
-    if (!unlockedPrivateKey) continue; // La clé correspond mais est verrouillée (absente de la Map de session)
+    if (!unlockedPrivateKey) continue; // La clé correspond mais est verrouillée
 
     try {
       console.log(`Tentative de déchiffrement avec la clé ${keyRecord.id}...`); 
-      console.log('Clé déverrouillée :', unlockedPrivateKey);
-      console.log('Type Clé déverrouillée :', typeof unlockedPrivateKey);
-      console.log('Message PGP :', parsedMessage);
-      console.log('Message PGP (armored) :', armoredMessage);
-      const { data: decryptedBytes } = await openpgp.decrypt({
+      
+      // 💡 On récupère 'signatures' en plus de 'data' depuis le résultat d'openpgp.decrypt
+      const { data: decryptedBytes, signatures } = await openpgp.decrypt({
         message: parsedMessage,
         decryptionKeys: await clearArmoredPrivateKeyToPrivateKey(unlockedPrivateKey),
-        format: 'binary' // Pour récupérer un Uint8Array exploitable par src/mime-parse.js
+        verificationKeys: knownPublicKeys, // 💡 Passage des clés publiques pour la signature imbriquée
+        format: 'binary'
       });
-
-      return { mimeBytes: decryptedBytes, keyRecordId: keyRecord.id };
+      console.log('signature:', signatures);
+      // 💡 On retourne les signatures avec le résultat
+      return { 
+        mimeBytes: decryptedBytes, 
+        keyRecordId: keyRecord.id,
+        signatures: signatures 
+      };
     } catch (e) {
       console.warn(`Échec de déchiffrement avec la clé ${keyRecord.id}, tentative suivante...`, e);
-      continue; // Erreur crypto ou mauvaise sous-clé, on tente le candidat suivant
+      continue;
     }
   }
 
-  // 4. Gestion des clés verrouillées (Demande d'UI via l'exception)
-  // Si on arrive ici, aucune clé déverrouillée n'a fonctionné. On vérifie s'il y a des candidats dormants.
+  // 4. Gestion des clés verrouillées
   const lockedRecord = (await matchedRecords).find((record:any) => !unlockedKeys.has(record.id));
   if (lockedRecord) {
     throw new PgpKeyLockedError(

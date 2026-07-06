@@ -137,11 +137,11 @@ export async function savePublicCert(cert: PublicCert): Promise<void> {
   await txPromise<IDBValidKey>(db, PUBLIC_CERTS_STORE, 'readwrite', (s) => s.put(cert));
 }
 
-export async function listPublicCerts(accountId?: string): Promise<PublicCert[]> {
+export async function listPublicCerts(email?: string): Promise<PublicCert[]> {
   const db = await openDB();
   const all = await txPromise<PublicCert[]>(db, PUBLIC_CERTS_STORE, 'readonly', (s) => s.getAll());
-  if (!accountId) return all;
-  return all.filter((c) => c.accountId === accountId || !c.accountId);
+  if (!email) return all;
+  return all.filter((c) => c.email === email || !c.email);
 }
 
 export async function deletePublicCert(id: string): Promise<void> {
