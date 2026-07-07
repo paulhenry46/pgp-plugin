@@ -26,7 +26,7 @@ import { clearArmoredPrivateKeyToPrivateKey } from './util.ts';
 import {
   saveKeyRecord, listKeyRecords, deleteKeyRecord, listPublicCerts, deletePublicCert,
   saveSessionKeys, getSessionKeys, deleteSessionKeys, clearSessionKeys, KeyRecord, PublicCert
-} from './key-storage.ts';
+} from './storage.ts';
 
  import {EmailSecuBanner, EmailBanner} from './ui/banners.tsx';
  import {SettingsSection} from './ui/settings.tsx';

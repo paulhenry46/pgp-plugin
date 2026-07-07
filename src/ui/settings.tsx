@@ -5,7 +5,7 @@ const { useState, useEffect, useCallback, useRef } = React;
 import {
   saveKeyRecord, listKeyRecords, deleteKeyRecord, listPublicCerts, deletePublicCert,
   saveSessionKeys, getSessionKeys, deleteSessionKeys, KeyRecord, PublicCert
-} from '../key-storage.ts';
+} from '../storage.ts';
 
  import { importOpenPgpPrivateKey, importOpenPgpPublicKey, unlockPrivateKey } from '../pgp/import.ts';
  import { btn, fmtDate, isExpired, card } from './shared.ts';

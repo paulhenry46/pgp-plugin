@@ -1,17 +1,19 @@
 /**
  * IndexedDB persistence for the OpenPGP plugin.
  *
- * Three stores:
+ * Four stores:
  * - key-records:   encrypted-at-rest private keys + public keys (durable)
  * - public-certs:  recipient/contact public PGP keys (durable)
  * - session-keys:  unlocked OpenPGP private key objects (session-scoped)
+ * - attachments:   email file attachments (durable) // only used when Atarchment + Draft are encrypted
  */
 
 const DB_NAME = 'pgp-plugin-store';
-const DB_VERSION = 1;
+const DB_VERSION = 2; // Incrémenté pour appliquer la mise à jour du schéma
 const KEY_RECORDS_STORE = 'key-records';
 const PUBLIC_CERTS_STORE = 'public-certs';
 const SESSION_KEYS_STORE = 'session-keys';
+const ATTACHMENTS_STORE = 'attachments';
 
 // ── Interfaces ──────────────────────────────────────
 
@@ -56,6 +58,14 @@ export interface SessionKeysEntry {
   signingKey: string;          // ASCII Armored
   decryptionKey: string;       // ASCII Armored
 }
+export interface AttachmentEntry {
+  id: string;         // Identifiant unique de la pièce jointe (ex: UUID ou hash)
+  mailId: string;     // Identifiant du mail associé
+  name: string;       // Nom du fichier (ex: "document.pdf")
+  type: string;       // Type MIME (ex: "application/pdf")
+  size: number;       // Taille en octets
+  file: Blob | File;  // Le contenu binaire brut du fichier
+}
 
 // ── BDD ENGINE ───────────────────────────────────────
 
@@ -65,6 +75,7 @@ function openDB(): Promise<IDBDatabase> {
     
     request.onupgradeneeded = () => {
       const db = request.result;
+      
       if (!db.objectStoreNames.contains(KEY_RECORDS_STORE)) {
         const keyStore = db.createObjectStore(KEY_RECORDS_STORE, { keyPath: 'id' });
         keyStore.createIndex('email', 'email', { unique: false });
@@ -77,6 +88,10 @@ function openDB(): Promise<IDBDatabase> {
       }
       if (!db.objectStoreNames.contains(SESSION_KEYS_STORE)) {
         db.createObjectStore(SESSION_KEYS_STORE, { keyPath: 'id' });
+      }
+      if (!db.objectStoreNames.contains(ATTACHMENTS_STORE)) {
+        const attachmentStore = db.createObjectStore(ATTACHMENTS_STORE, { keyPath: 'id' });
+        attachmentStore.createIndex('mailId', 'mailId', { unique: false });
       }
     };
     
@@ -173,4 +188,55 @@ export async function deleteSessionKeys(id: string): Promise<void> {
 export async function clearSessionKeys(): Promise<void> {
   const db = await openDB();
   await txPromise<undefined>(db, SESSION_KEYS_STORE, 'readwrite', (s) => s.clear());
+}
+
+// ── Attachments CRUD ────────────────────────────────────────────────
+
+export async function saveAttachment(attachment: AttachmentEntry): Promise<void> {
+  const db = await openDB();
+  await txPromise<IDBValidKey>(db, ATTACHMENTS_STORE, 'readwrite', (s) => s.put(attachment));
+}
+
+export async function getAttachment(id: string): Promise<AttachmentEntry | undefined> {
+  const db = await openDB();
+  return txPromise<AttachmentEntry | undefined>(db, ATTACHMENTS_STORE, 'readonly', (s) => s.get(id));
+}
+
+export async function getAttachmentsByMailId(mailId: string): Promise<AttachmentEntry[]> {
+  const db = await openDB();
+  return new Promise((resolve, reject) => {
+    const tx = db.transaction(ATTACHMENTS_STORE, 'readonly');
+    const store = tx.objectStore(ATTACHMENTS_STORE);
+    const index = store.index('mailId');
+    const request = index.getAll(mailId);
+
+    request.onsuccess = () => resolve(request.result as AttachmentEntry[]);
+    request.onerror = () => reject(request.error);
+  });
+}
+
+export async function deleteAttachment(id: string): Promise<void> {
+  const db = await openDB();
+  await txPromise<undefined>(db, ATTACHMENTS_STORE, 'readwrite', (s) => s.delete(id));
+}
+
+export async function deleteAttachmentsByMailId(mailId: string): Promise<void> {
+  const db = await openDB();
+  return new Promise((resolve, reject) => {
+    const tx = db.transaction(ATTACHMENTS_STORE, 'readwrite');
+    const store = tx.objectStore(ATTACHMENTS_STORE);
+    const index = store.index('mailId');
+    const request = index.openKeyCursor(IDBKeyRange.only(mailId));
+
+    request.onsuccess = () => {
+      const cursor = request.result;
+      if (cursor) {
+        store.delete(cursor.primaryKey);
+        cursor.continue();
+      } else {
+        resolve(); // Fin du curseur, toutes les entrées correspondantes ont été supprimées
+      }
+    };
+    request.onerror = () => reject(request.error);
+  });
 }

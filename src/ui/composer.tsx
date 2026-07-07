@@ -3,7 +3,7 @@ import React from 'react'
 const h = React.createElement;
 const { useState, useEffect, useCallback, useRef } = React;
 
-import { listKeyRecords } from '../key-storage.ts';
+import { listKeyRecords } from '../storage.ts';
 import { btn } from './shared.ts';
 import { settings, INTENT_KEY } from '../shared.ts';
 import {isCapable} from '../index.tsx';

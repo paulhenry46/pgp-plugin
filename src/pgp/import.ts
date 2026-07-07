@@ -9,7 +9,7 @@
 import * as openpgp from 'openpgp';
 import { generateUUID } from '../util.ts';
 import { extractKeyInfo } from './key-utils.ts';
-import { KeyRecord, listPublicCerts, savePublicCert } from '../key-storage.ts';
+import { KeyRecord, listPublicCerts, savePublicCert } from '../storage.ts';
 
 const KDF_ITERATIONS = 600_000;
 const AES_KEY_LENGTH = 256;
