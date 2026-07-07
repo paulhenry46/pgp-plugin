@@ -920,18 +920,18 @@ function EmailSecuBanner(props: EmailProps) {
 
   if (isEncrypted && isSigned) {
     label = 'Encrypted and signed';
-    color = hasSignatureError ? 'var(--color-destructive, #dc2626)' : 'var(--color-success, #16a34a)';
-    bgcolor = hasSignatureError ? 'var(--color-red-950, #dc2626)' : 'var(--color-green-950, #0b2e17)';
+    color = hasSignatureError ? 'var(--color-destructive, #dc2626)' : '#00c950';
+    bgcolor = hasSignatureError ? '#fb2c36' : '#00c950';
     icons.push(svgEncrypted, hasSignatureError ? svgError : svgSigned);
   } else if (isEncrypted) {
     label = 'Encrypted';
     color = 'var(--color-success, #16a34a)';
-    bgcolor = 'var(--color-green-950, #0b2e17)';
+    bgcolor = '#00c950';
     icons.push(svgEncrypted);
   } else if (isSigned) {
     label = 'Signed';
-    color = hasSignatureError ? 'var(--color-destructive, #dc2626)' : 'var(--color-success, #16a34a)';
-    bgcolor = hasSignatureError ? 'var(--color-red-950, #dc2626)' : 'var(--color-green-950, #0b2e17)';
+    color = hasSignatureError ? 'var(--color-destructive, #dc2626)' : '#00c950';
+    bgcolor = hasSignatureError ? '#fb2c36' : '#00c950';
     icons.push(hasSignatureError ? svgError : svgSigned);
   }
 
@@ -951,7 +951,7 @@ function EmailSecuBanner(props: EmailProps) {
         'border-width': '1px',
         'font-size': '0.75rem',
         'line-height': '1rem',
-        
+        'background-color': `color-mix(in oklab, ${bgcolor} 7.0%, transparent)`,
         'border-color': color,
         'border-style': 'solid',
       }
