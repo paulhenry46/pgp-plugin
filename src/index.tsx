@@ -227,8 +227,9 @@ export async function onComposeSend(req: ComposeRequest): Promise<boolean | unde
   if (!req || typeof req !== 'object') return undefined;
 
   const { sign, encrypt } = await resolveIntent(req);
+  console.log('sign:', sign, 'encrypt:', encrypt);
   if (!sign && !encrypt) return undefined;
-
+  console.log('on continue');
   if (!(await isCapable())) {
     host.toast.error('Cannot sign/encrypt: OpenPGP is not running in the privileged tier.');
     return false;
@@ -592,23 +593,26 @@ function isExpired(iso: string | number | Date | null) {
 // ─── UI: composer toolbar (Sign / Encrypt toggles) ─────────────────────
 
 interface PgpIntent {
-  sign: boolean;
-  encrypt: boolean;
+  sign: boolean |undefined;
+  encrypt: boolean |undefined;
 }
 
 function ComposerToolbar() {
+  const defaultSign = settings().defaultSign;
+  const defaultEncrypt = settings().defaultEncrypt;
   // Apply the generic type to state
-  const [intent, setIntent] = useState<PgpIntent>({ sign: false, encrypt: false });
+  const [intent, setIntent] = useState<PgpIntent>({ sign: defaultSign, encrypt: defaultEncrypt });
   const [ready, setReady] = useState<boolean>(false);
-
   useEffect(() => {
     let alive = true;
     (async () => {
       try {
+        await host.storage.set(INTENT_KEY, intent);
         if (!(await isCapable())) { if (alive) setReady(false); return; }
         const stored = (await host.storage.get(INTENT_KEY)) || {};
         
         if (alive) {
+          console.log(settings());
           setIntent({
             sign: typeof stored.sign === 'boolean' ? stored.sign : !!settings().defaultSign,
             encrypt: typeof stored.encrypt === 'boolean' ? stored.encrypt : !!settings().defaultEncrypt,
@@ -630,7 +634,7 @@ function ComposerToolbar() {
   // 2. Main fix: key must be a valid PgpIntent key ('sign' | 'encrypt')
   const toggle = (key: keyof PgpIntent) => update({ ...intent, [key]: !intent[key] });
 
-  const pill = (active: boolean) => ({
+  const pill = (active: boolean | undefined) => ({
     ...btn,
     background: active ? 'var(--color-accent, #25eb43)' : 'var(--color-background, #141516)',
     color: active ? '#fff' : 'var(--color-foreground, #0f172a)',
