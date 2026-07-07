@@ -582,7 +582,7 @@ const btn = {
 };
 
 function fmtDate(iso: string | number | Date | null) {
-  try { return iso ? new Date(iso).toLocaleDateString() : 'Never expires'; } catch { return iso; }
+  try { return iso ? new Date(iso).toLocaleDateString() : 'Never'; } catch { return iso; }
 }
 function isExpired(iso: string | number | Date | null) {
   if(!iso) return false;
@@ -856,7 +856,6 @@ function EmailSecuBanner(props: EmailProps) {
       const s: VerificationStatus | null = await host.storage.get(VERIFY_PREFIX + emailId);
       
       if (!alive) return;
-
       if (s && !s.processing) {
         setStatus(s);
         console.log('s', s);
@@ -920,7 +919,7 @@ function EmailSecuBanner(props: EmailProps) {
   const icons: any[] = [];
 
   if (isEncrypted && isSigned) {
-    label = 'Encrypted et signed';
+    label = 'Encrypted and signed';
     color = hasSignatureError ? 'var(--color-destructive, #dc2626)' : 'var(--color-success, #16a34a)';
     bgcolor = hasSignatureError ? 'var(--color-red-950, #dc2626)' : 'var(--color-green-950, #0b2e17)';
     icons.push(svgEncrypted, hasSignatureError ? svgError : svgSigned);
