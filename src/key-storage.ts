@@ -7,8 +7,6 @@
  * - session-keys:  unlocked OpenPGP private key objects (session-scoped)
  */
 
-import * as openpgp from 'openpgp';
-
 const DB_NAME = 'pgp-plugin-store';
 const DB_VERSION = 1;
 const KEY_RECORDS_STORE = 'key-records';

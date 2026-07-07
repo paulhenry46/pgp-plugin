@@ -5,7 +5,7 @@
 
 import * as openpgp from 'openpgp';
 import host from '@plugin-host';
-import { importOpenPgpPublicKey } from './pgp-import.ts';
+import { importOpenPgpPublicKey } from './import.ts';
 // ── Helpers & Conversions ───────────────────────────────────────────
 
 /**

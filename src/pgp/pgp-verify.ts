@@ -3,7 +3,7 @@
  */
 
 import * as openpgp from 'openpgp';
-import { extractKeyInfo } from './pgp-key-utils.js';
+import { extractKeyInfo } from './key-utils.ts';
 
 /**
  * Verifies a message's OpenPGP signature and extracts the full status as well as the content.

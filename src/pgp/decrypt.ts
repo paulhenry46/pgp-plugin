@@ -4,8 +4,8 @@
  */
 
 import * as openpgp from 'openpgp';
-import {KeyRecord} from './key-storage.ts'; // Import the KeyRecord interface generated in the previous step
-import { clearArmoredPrivateKeyToPrivateKey } from './util.ts';
+import {KeyRecord} from '../key-storage.ts'; // Import the KeyRecord interface generated in the previous step
+import { clearArmoredPrivateKeyToPrivateKey } from '../util.ts';
 
 export class PgpKeyLockedError extends Error {
   public keyRecordId: string;

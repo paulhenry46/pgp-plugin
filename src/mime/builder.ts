@@ -5,7 +5,7 @@
  */
 
 import { createMimeMessage } from 'mimetext/browser';
-import { generateUUID } from './util.ts';
+import { generateUUID } from '../util.ts';
 
 const CRLF = '\r\n';
 
