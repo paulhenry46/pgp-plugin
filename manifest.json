@@ -15,6 +15,7 @@
     "email:send",
     "smime:read",
     "ui:composer-toolbar",
+    "ui:composer-sidebar",
     "ui:email-banner",
     "ui:settings-section",
     "app:lifecycle",

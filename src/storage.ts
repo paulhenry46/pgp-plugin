@@ -60,7 +60,6 @@ export interface SessionKeysEntry {
 }
 export interface AttachmentEntry {
   id: string;         // Identifiant unique de la pièce jointe (ex: UUID ou hash)
-  mailId: string;     // Identifiant du mail associé
   name: string;       // Nom du fichier (ex: "document.pdf")
   type: string;       // Type MIME (ex: "application/pdf")
   size: number;       // Taille en octets
@@ -202,13 +201,31 @@ export async function getAttachment(id: string): Promise<AttachmentEntry | undef
   return txPromise<AttachmentEntry | undefined>(db, ATTACHMENTS_STORE, 'readonly', (s) => s.get(id));
 }
 
-export async function getAttachmentsByMailId(mailId: string): Promise<AttachmentEntry[]> {
+export async function clearAllAttachments(): Promise<void> {
+  const db = await openDB();
+  return new Promise((resolve, reject) => {
+    const tx = db.transaction(ATTACHMENTS_STORE, 'readwrite');
+    const store = tx.objectStore(ATTACHMENTS_STORE);
+    
+    // Équivalent d'un TRUNCATE : vide le store instantanément
+    const request = store.clear();
+
+    request.onsuccess = () => resolve();
+    request.onerror = () => reject(request.error);
+  });
+}
+
+/**
+ * Récupère TOUTES les pièces jointes actuellement stockées.
+ */
+export async function getAllAttachments(): Promise<AttachmentEntry[]> {
   const db = await openDB();
   return new Promise((resolve, reject) => {
     const tx = db.transaction(ATTACHMENTS_STORE, 'readonly');
     const store = tx.objectStore(ATTACHMENTS_STORE);
-    const index = store.index('mailId');
-    const request = index.getAll(mailId);
+    
+    // Récupère l'intégralité des fichiers présents
+    const request = store.getAll();
 
     request.onsuccess = () => resolve(request.result as AttachmentEntry[]);
     request.onerror = () => reject(request.error);
@@ -218,25 +235,4 @@ export async function getAttachmentsByMailId(mailId: string): Promise<Attachment
 export async function deleteAttachment(id: string): Promise<void> {
   const db = await openDB();
   await txPromise<undefined>(db, ATTACHMENTS_STORE, 'readwrite', (s) => s.delete(id));
-}
-
-export async function deleteAttachmentsByMailId(mailId: string): Promise<void> {
-  const db = await openDB();
-  return new Promise((resolve, reject) => {
-    const tx = db.transaction(ATTACHMENTS_STORE, 'readwrite');
-    const store = tx.objectStore(ATTACHMENTS_STORE);
-    const index = store.index('mailId');
-    const request = index.openKeyCursor(IDBKeyRange.only(mailId));
-
-    request.onsuccess = () => {
-      const cursor = request.result;
-      if (cursor) {
-        store.delete(cursor.primaryKey);
-        cursor.continue();
-      } else {
-        resolve(); // Fin du curseur, toutes les entrées correspondantes ont été supprimées
-      }
-    };
-    request.onerror = () => reject(request.error);
-  });
 }
