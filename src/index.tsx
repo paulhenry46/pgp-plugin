@@ -33,7 +33,6 @@ import {
  import {ComposerToolbar} from './ui/composer-toolbar.tsx';
 import {emailsOf, blobToBytes, bytesArrayBuffer, addrList} from './util.ts';
 import {PREFS_KEY, INTENT_KEY, VERIFY_PREFIX, settings} from './shared.ts';
-import { ComposerSidebar } from './ui/composer-sidebar.tsx';
 
 
 // ─── Privileged-tier capability probe ─────────────────────────────────
@@ -857,7 +856,6 @@ function shouldShow(extraProps: any) {
 
 export const slots = {
   'composer-toolbar': { component: ComposerToolbar, order: 70 },
-  'composer-sidebar': { component: ComposerSidebar, order: 70 },
   'email-banner': { component: EmailBanner, order: 20 },
   'settings-section': { component: SettingsSection, order: 100 },
   "email-details-section": {
