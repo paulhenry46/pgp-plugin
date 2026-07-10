@@ -1,9 +1,14 @@
-import { VerifSignerCert } from "../index.tsx";
 import host from '@plugin-host';
 import React from 'react'
 import { VERIFY_PREFIX } from '../shared.ts';
 const h = React.createElement;
 const { useState, useEffect } = React;
+
+ interface VerifSignerCert {
+id: string;
+email: string;
+fingerprint: string;
+}
 
 interface EmailHeaders {
   'Content-Type'?: string | string[];

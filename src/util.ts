@@ -1,5 +1,6 @@
 import * as openpgp from 'openpgp';
 import host from '@plugin-host';
+import { getSessionKeys, KeyRecord, listKeyRecords, listPublicCerts } from './storage.ts';
 // Small browser helpers shared across the S/MIME plugin modules.
 // (The native app pulled these from @/lib/utils; the sandbox has no host
 // imports, so we provide local, dependency-free equivalents.)
@@ -97,7 +98,7 @@ export async function fetchBlobAsDataUrl(blobId: string, options?: { name?: stri
   // 1. Récupérer le Uint8Array
   const bytes = await host.jmap.fetchBlob(blobId, options);
 
-  
+
   
   // 2. Spécifier le type MIME (par défaut application/octet-stream si non fourni)
   const mimeType = options?.type || 'application/octet-stream';
@@ -138,4 +139,41 @@ export function extractEmailContent(bodyStructure: any, bodyValues: any): { plai
     }
 
     return { plainText, htmlText };
+}
+
+// -------- Key Resolution--------
+
+export async function signingKeyRecordForEmail(fromEmail: string | undefined): Promise<KeyRecord | undefined> {
+  const recs = await listKeyRecords();
+  const lower = (fromEmail || '').toLowerCase();
+  return (
+    recs.find((r) => r.email === lower && r.capabilities?.canSign !== false) ||
+    recs.find((r) => r.email === lower) ||
+    undefined
+  );
+}
+
+export async function recipientKeysFor(emails:any) {
+  const certs = await listPublicCerts();
+  const found = [];
+  const missing = [];
+  for (const email of emails) {
+    const c = certs.find((pc) => pc.email.toLowerCase() === email.toLowerCase());
+    if (c) found.push(c.publicKey); // Utilise .publicKey au lieu de .certificate
+    else missing.push(email);
+  }
+  return { found, missing };
+}
+
+// Build the map of unlocked private keys from the session store.
+export async function unlockedDecryptMaps() {
+  const recs = await listKeyRecords();
+  const unlockedKeys = new Map();
+  for (const r of recs) {
+    const s = await   getSessionKeys(r.id);
+    if (!s) continue;
+    // OpenPGP unifies the decryption key (no legacy key needed anymore)
+    if (s.unlockedPrivateKey) unlockedKeys.set(r.id, s.unlockedPrivateKey);
+  }
+  return { keyRecords: recs, unlockedKeys };
 }
