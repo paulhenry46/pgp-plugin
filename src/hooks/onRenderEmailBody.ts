@@ -8,7 +8,7 @@ import { parseMime } from '../mime/parse.ts';
 import { extractKeyInfo, scanAndImportKeysFromAttachments } from '../pgp/key-utils.ts';
 
 import {emailsOf, blobToBytes, bytesArrayBuffer, addrList} from '../util.ts';
-import {PREFS_KEY, INTENT_KEY, VERIFY_PREFIX, settings} from '../shared.ts';
+import {PREFS_KEY, INTENT_KEY, VERIFY_PREFIX, settings, STATE_PREFIX} from '../shared.ts';
 import { listPublicCerts } from '../storage.ts';
 import {unlockedDecryptMaps} from '../util.ts';
 import { isCapable } from '../index.tsx';
@@ -50,6 +50,7 @@ export async function onRenderEmailBody(body: any, ctx: any) {
 
     // ── Case 1 : Encrypted (And potentially signed) ──
     if (isEncryptedCase) {
+        await persistEmailListState(ctx.id, { isEncrypted: true, decryptionSuccess: null, processing: true });
       const { keyRecords, unlockedKeys } = await unlockedDecryptMaps();
 
       if (detection.type === 'pgp-inline-encrypted') {
@@ -347,4 +348,9 @@ async function handleMimeEncrypted(
 async function persistVerifyStatus(emailId: string, status: any) {
   if (!emailId) return;
  try { await host.storage.set(VERIFY_PREFIX + emailId, status); } catch { /* ignore */ }
+}
+
+async function persistEmailListState(emailId: string, status: any) {
+  if (!emailId) return;
+ try { await host.storage.set(STATE_PREFIX + emailId, status); } catch { /* ignore */ }
 }

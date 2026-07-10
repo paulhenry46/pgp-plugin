@@ -155,31 +155,3 @@ export async function getDefaultPublicCert(): Promise<PublicCert | undefined> {
   const all = await txPromise<PublicCert[]>(db, PUBLIC_CERTS_STORE, 'readonly', (s) => s.getAll());
   return all.find((c) => c.default === true);
 }
-
-// ── Session (unlocked OpenPGP Key Objects) CRUD ─────────────────────
-
-export async function saveSessionKeys(entry: SessionKeysEntry): Promise<void> {
-  const db = await openDB();
-  await txPromise<IDBValidKey>(db, SESSION_KEYS_STORE, 'readwrite', (s) => s.put(entry));
-}
-
-export async function getSessionKeys(id: string): Promise<SessionKeysEntry | undefined> {
-  const db = await openDB();
-  return txPromise<SessionKeysEntry | undefined>(db, SESSION_KEYS_STORE, 'readonly', (s) => s.get(id));
-}
-
-export async function listSessionKeyIds(): Promise<string[]> {
-  const db = await openDB();
-  const all = await txPromise<IDBValidKey[]>(db, SESSION_KEYS_STORE, 'readonly', (s) => s.getAllKeys());
-  return all as string[];
-}
-
-export async function deleteSessionKeys(id: string): Promise<void> {
-  const db = await openDB();
-  await txPromise<undefined>(db, SESSION_KEYS_STORE, 'readwrite', (s) => s.delete(id));
-}
-
-export async function clearSessionKeys(): Promise<void> {
-  const db = await openDB();
-  await txPromise<undefined>(db, SESSION_KEYS_STORE, 'readwrite', (s) => s.clear());
-}

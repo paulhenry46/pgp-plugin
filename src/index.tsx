@@ -11,7 +11,7 @@
  * • settings-section slot         → key import, unlock/lock, recipient public keys
  */
 import host from '@plugin-host';
-import { listKeyRecords, clearSessionKeys } from './storage.ts';
+import { listKeyRecords } from './storage.ts';
 
 import {EmailSecuBanner, EmailBanner} from './ui/banners.tsx';
 import {SettingsSection} from './ui/settings.tsx';
@@ -23,6 +23,7 @@ import {onBeforeEditDraft} from './hooks/onBeforeEditDraft.ts';
 import {onBeforeBlobUpload} from './hooks/onBeforeBlobUpload.ts';
 import {onComposeSend} from './hooks/onComposeSend.ts';
 import { initBackgroundSessionListener } from './pgp/session-broadcast.ts';
+import { onEmailListItemRender } from './hooks/onEmailListRender.ts';
 
 
 // ─── Privileged-tier capability probe ─────────────────────────────────
@@ -62,14 +63,15 @@ export const hooks = {
   onBeforeEditDraft,
   onBeforeDraftAutoSave,
   onBeforeBlobUpload,
-  async onAfterLogout() {
+  onEmailListItemRender,
+ /*  async onAfterLogout() {
     if (settings().lockOnLogout === false) return;
     try { await clearSessionKeys(); } catch (err) { host.log.warn('clearSessionKeys failed', err); }
   },
   async onAccountSwitch() {
     if (settings().lockOnLogout === false) return;
     try { await clearSessionKeys(); } catch (err) { host.log.warn('clearSessionKeys failed', err); }
-  },
+  }, */
 };
 
 function shouldShow(extraProps: any) {

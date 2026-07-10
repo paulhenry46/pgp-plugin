@@ -1,3 +1,6 @@
+import { STATE_PREFIX, VERIFY_PREFIX } from "../shared.ts";
+import host from '@plugin-host';
+
 export interface EmailListBadge {
   /** Stable unique key within the plugin - used as React key */
   key: string;
@@ -58,9 +61,25 @@ export interface EmailReadView {
 }
 
 
-export function onEmailListItemRender(list: EmailListBadge[], context: Context): EmailListBadge[] {
+export async function onEmailListItemRender(list: EmailListBadge[], context: Context): Promise<EmailListBadge[]> {
+  console.log('onEmailListItemRender called for emailId:', context.emailId);
+  const status = await getEmailListStatus(context.emailId);
+    if (status && status.isEncrypted){
+      list.push({
+        key: 'pgp-encrypted',
+        label: 'Encrypted',
+        color: 'var(--color-success)',
+        title: 'This email is encrypted with PGP.',
+      });
+      console.log(list);
+      return list;
+    }else{
+      console.log(list);
+      return list;
+    }
+}
 
-    
-
-    return list;
+async function getEmailListStatus(emailId: string): Promise<any> {
+  if (!emailId) return;
+ return await host.storage.get(STATE_PREFIX + emailId); 
 }
