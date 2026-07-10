@@ -1,6 +1,7 @@
 import * as openpgp from 'openpgp';
 import host from '@plugin-host';
 import { getSessionKeys, KeyRecord, listKeyRecords, listPublicCerts } from './storage.ts';
+import { fetchKeyFromBackground, getBackgroundSessionKey } from './pgp/session-broadcast.ts';
 // Small browser helpers shared across the S/MIME plugin modules.
 // (The native app pulled these from @/lib/utils; the sandbox has no host
 // imports, so we provide local, dependency-free equivalents.)
@@ -170,7 +171,7 @@ export async function unlockedDecryptMaps() {
   const recs = await listKeyRecords();
   const unlockedKeys = new Map();
   for (const r of recs) {
-    const s = await   getSessionKeys(r.id);
+    const s = await fetchKeyFromBackground(r.id);
     if (!s) continue;
     // OpenPGP unifies the decryption key (no legacy key needed anymore)
     if (s.unlockedPrivateKey) unlockedKeys.set(r.id, s.unlockedPrivateKey);

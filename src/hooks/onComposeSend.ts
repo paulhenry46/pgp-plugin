@@ -13,6 +13,7 @@ import {
 import {emailsOf, blobToBytes, bytesArrayBuffer} from '../util.ts';
 import { INTENT_KEY, settings} from '../shared.ts';
 import { isCapable } from '../index.tsx';
+import { fetchKeyFromBackground } from '../pgp/session-broadcast.ts';
 
 
 export interface ComposeAttachment {
@@ -132,7 +133,7 @@ export async function onComposeSend(req: ComposeRequest): Promise<boolean | unde
     console.log('builded Message');
     
     const currentKeyRecord = keyRecord as KeyRecord;
-    const session = await getSessionKeys(currentKeyRecord.id);
+    const session = await fetchKeyFromBackground(currentKeyRecord.id);
 
     // 2. Process cryptographic combinations (Sign, Encrypt, or Sign+Encrypt)
     if (encrypt) {

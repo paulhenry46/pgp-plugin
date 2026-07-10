@@ -22,6 +22,7 @@ import {onBeforeDraftAutoSave} from './hooks/onBeforeDraftAutoSave.ts';
 import {onBeforeEditDraft} from './hooks/onBeforeEditDraft.ts';
 import {onBeforeBlobUpload} from './hooks/onBeforeBlobUpload.ts';
 import {onComposeSend} from './hooks/onComposeSend.ts';
+import { initBackgroundSessionListener } from './pgp/session-broadcast.ts';
 
 
 // ─── Privileged-tier capability probe ─────────────────────────────────
@@ -94,7 +95,9 @@ export async function activate(api :any) {
     try { api.toast.error('OpenPGP needs the privileged tier — see plugin logs.'); } catch { /* ignore */ }
     return;
   }
-  try { await clearSessionKeys(); } catch (err) { api.log.warn('OpenPGP: clearSessionKeys failed', err); }
+  initBackgroundSessionListener();
+  
+  api.log.info('OpenPGP plugin activated with memory-only session management.');
   let keyCount = 0;
   try { keyCount = (await listKeyRecords()).length; } catch (err) { api.log.warn('OpenPGP: listKeyRecords failed', err); }
   api.log.info(`OpenPGP plugin activated (${keyCount} key${keyCount === 1 ? '' : 's'} available)`);
