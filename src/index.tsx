@@ -329,6 +329,7 @@ fingerprint: string;
 }
 
  export async function onBeforeBlobUpload(fileId: string) {
+  if(settings().encryptDrafts !== true) return fileId;
   const file = await host.upfiles.get(fileId);
   if (!file) return;
   // Get the pub key
@@ -366,6 +367,8 @@ export interface AlmostSavedDraft{
 }
 
  export async function onBeforeDraftAutoSave(draft: AlmostSavedDraft): Promise<AlmostSavedDraft> {
+  if(settings().encryptDrafts !== true) return draft;
+
   // pub key
   const key = (await getDefaultPublicCert())?.publicKey || '';
   console.log('Default public key for draft auto-save:', key);
@@ -427,9 +430,11 @@ export interface AlmostSavedDraft{
   }
 
   return modifiedDraft;
-} 
+}
 
 export async function onBeforeEditDraft(email: any): Promise<any> {
+  if(settings().encryptDrafts !== true) return email;
+
   console.log('Editing draft email:', email);
   // 1. Cloner l'objet pour éviter de muter l'original de manière imprévue
   const modifiedEmail = { ...email };
@@ -715,6 +720,40 @@ async function handleInlineEncrypted(
       } catch (e) {
         console.error('Erreur lors du parsing des métadonnées PGP :', e);
       }
+    }else if(ctx.attachments && ctx.attachments.length > 0){
+      const acc = [];
+      console.warn('No metadata found for attachments, but attachments exist. They may not be restored correctly.');
+      for(const att of ctx.attachments){
+            
+              const decryptedData = (await pgpDecrypt({
+                    cmsBytes: await host.jmap.fetchBlob(att.blobId),
+                    keyRecords,
+                    unlockedKeys,
+                    knownPublicKeys,
+                  })).mimeBytes;
+
+                const dataUrl = await new Promise<string>((resolve, reject) => {
+                    const reader = new FileReader();
+                    
+                    reader.onloadend = () => {
+                      resolve(reader.result as string);
+                    };
+                    
+                    reader.onerror = () => {
+                      reject(reader.error);
+                    };
+                    
+                    reader.readAsDataURL(new Blob([decryptedData as BlobPart], { type: att.type }));
+                  });
+
+                acc.push({
+                  name: att.name,
+                  type: att.type,
+                  size: att.size || 0,
+                  dataUrl: dataUrl,
+                });
+          }
+          attachments=acc
     }
   }
   const verif = { isEncrypted: true, decryptionSuccess: true, isSigned: false }

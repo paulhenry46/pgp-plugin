@@ -32,6 +32,7 @@ declare module '@plugin-host' {
       defaultSign?: boolean;
       defaultEncrypt?: boolean;
       lockOnLogout?: boolean;
+      encryptDrafts?: boolean;
     };
   } | undefined;
 }

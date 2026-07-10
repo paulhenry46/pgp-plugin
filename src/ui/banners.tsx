@@ -254,7 +254,7 @@ export function EmailSecuBanner(props: EmailProps) {
         'font-size': '0.75rem',
         'line-height': '1rem',
         'background-color': `color-mix(in oklab, ${bgcolor} 7.0%, transparent)`,
-        'border-color': color,
+        'border-color': 'var(--color-border)',
         'border-style': 'solid',
       }
     },

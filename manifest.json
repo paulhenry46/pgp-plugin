@@ -33,6 +33,12 @@
       "description": "When a validly signed message is opened, remember the signer's certificate so you can later send them encrypted mail without importing it manually.",
       "default": true
     },
+    "encryptDrafts": {
+      "type": "boolean",
+      "label": "Encrypt drafts and uploaded attachments",
+      "description": "Encrypt drafts and attachments before saving them to the server. This is useful if you want to keep your drafts private, but it may cause issues if you activated the 'Encrypt on append' option in your stalwart account",
+      "default": true
+    },
     "lockOnLogout": {
       "type": "boolean",
       "label": "Lock keys on logout",
