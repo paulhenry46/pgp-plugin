@@ -50,6 +50,7 @@ export interface PublicCert {
   notAfter: string | null;
   fingerprint: string;
   source: string;
+  default?: boolean;
 }
 
 export interface SessionKeysEntry {
@@ -159,6 +160,12 @@ export async function listPublicCerts(email?: string): Promise<PublicCert[]> {
 export async function deletePublicCert(id: string): Promise<void> {
   const db = await openDB();
   await txPromise<undefined>(db, PUBLIC_CERTS_STORE, 'readwrite', (s) => s.delete(id));
+}
+
+export async function getDefaultPublicCert(): Promise<PublicCert | undefined> {
+  const db = await openDB();
+  const all = await txPromise<PublicCert[]>(db, PUBLIC_CERTS_STORE, 'readonly', (s) => s.getAll());
+  return all.find((c) => c.default === true);
 }
 
 // ── Session (unlocked OpenPGP Key Objects) CRUD ─────────────────────

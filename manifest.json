@@ -9,6 +9,7 @@
   "permissions": [
     "crypto:full",
     "email:blob-read",
+    "email:blob-write",
     "email:raw-send",
     "email:render-takeover",
     "email:read",

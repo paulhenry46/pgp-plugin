@@ -8,6 +8,11 @@ declare module '@plugin-host' {
     fetchBlob(blobId: string, options?: { name?: string; type?: string }): Promise<Uint8Array>;
     sendRaw(blob: ArrayBuffer, identityId: string, options: { envelopeRecipients: string[] }): Promise<void>;
   };
+  export const upfiles: {
+    get(fileId: string): Promise<File>;
+    save(formerId: string, file: File): Promise<string>;
+    
+  };
   export const log: {
     info(msg: string, ...args: any[]): void;
     warn(msg: string, ...args: any[]): void;

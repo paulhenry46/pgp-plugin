@@ -4,7 +4,8 @@ const h = React.createElement;
 const { useState, useEffect, useCallback, useRef } = React;
 import {
   saveKeyRecord, listKeyRecords, deleteKeyRecord, listPublicCerts, deletePublicCert,
-  saveSessionKeys, getSessionKeys, deleteSessionKeys, KeyRecord, PublicCert
+  saveSessionKeys, getSessionKeys, deleteSessionKeys, KeyRecord, PublicCert,
+  savePublicCert
 } from '../storage.ts';
 
  import { importOpenPgpPrivateKey, importOpenPgpPublicKey, unlockPrivateKey } from '../pgp/import.ts';
@@ -163,6 +164,36 @@ export function SettingsSection() {
   }
 
 
+  async function handleSetDefaultCert(targetCert: PublicCert, isChecked: boolean) {
+  setBusy(true);
+  try {
+    // Si on coche la case, on passe cette clé par défaut et on décoche les autres.
+    // Si on la décoche, on retire simplement le statut par défaut.
+    await Promise.all(
+      certs.map((c) => {
+        const isCurrent = c.id === targetCert.id;
+        return savePublicCert({
+          ...c,
+          default: isCurrent ? isChecked : (isChecked ? false : c.default)
+        });
+      })
+    );
+    
+    host.toast.success(
+      isChecked 
+        ? `Clé de ${targetCert.email} définie par défaut` 
+        : `Clé par défaut retirée`
+    );
+    await refresh();
+  } catch (err) {
+    const error = err as Error;
+    host.toast.error(`Erreur : ${error?.message ? error.message : String(err)}`);
+  } finally {
+    setBusy(false);
+  }
+}
+
+
   return h('div', { style: { display: 'flex', flexDirection: 'column', gap: '16px', maxWidth: '720px' } },
   h('div', null,
     h('h3', { style: { margin: '0 0 4px', fontSize: '15px', fontWeight: 600 } }, 'Your OpenPGP keys'),
@@ -257,17 +288,30 @@ export function SettingsSection() {
         h('button', { type: 'button', style: btn, disabled: busy, onClick: importCertFile }, 'Import public key'),
       ),
       certs.length === 0
-        ? h('div', { style: { ...card, fontSize: '13px', color: 'var(--color-muted-foreground, #64748b)' } }, 'No recipient public keys collected.')
-        : h('div', { style: { display: 'flex', flexDirection: 'column', gap: '6px' } },
-          certs.map((c) => h('div', { key: c.id, style: { ...card, display: 'flex', justifyContent: 'space-between', gap: '8px', alignItems: 'center' } },
+      ? h('div', { style: { ...card, fontSize: '13px', color: 'var(--color-muted-foreground, #64748b)' } }, 'No recipient public keys collected.')
+      : h('div', { style: { display: 'flex', flexDirection: 'column', gap: '6px' } },
+        certs.map((c) => h('div', { key: c.id, style: { ...card, display: 'flex', justifyContent: 'space-between', gap: '8px', alignItems: 'center' } },
+          // Conteneur alignant la checkbox et les infos textuelles
+          h('div', { style: { display: 'flex', alignItems: 'center', gap: '12px' } },
+            h('input', {
+              type: 'checkbox',
+              checked: !!c.default,
+              disabled: busy,
+              onChange: (e) => handleSetDefaultCert(c, e.target.checked),
+              style: { cursor: 'pointer', width: '16px', height: '16px' }
+            }),
             h('div', null,
-              h('div', { style: { fontWeight: 600, fontSize: '13px' } }, c.email || c.subject),
+              h('div', { style: { fontWeight: 600, fontSize: '13px' } }, 
+                c.email || c.subject,
+                c.default && h('span', { style: { marginLeft: '8px', fontSize: '11px', padding: '2px 6px', borderRadius: '4px', background: 'var(--color-primary-smooth, #e0f2fe)', color: '#0369a1', fontWeight: 'normal' } }, 'Par défaut')
+              ),
               h('div', { style: { fontSize: '11px', color: 'var(--color-muted-foreground, #64748b)' } },
                 `${c.source} · expires ${fmtDate(c.notAfter)}${isExpired(c.notAfter) ? ' · EXPIRED' : ''}`),
-            ),
-            h('button', { type: 'button', style: { ...btn, color: 'var(--color-destructive, #dc2626)' }, onClick: () => removeCert(c) }, 'Remove'),
-          )),
-        ),
+            )
+          ),
+          h('button', { type: 'button', style: { ...btn, color: 'var(--color-destructive, #dc2626)' }, disabled: busy, onClick: () => removeCert(c) }, 'Remove'),
+        )),
+      ),
     ),
   );
 }

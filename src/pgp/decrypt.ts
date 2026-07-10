@@ -44,6 +44,7 @@ export async function pgpDecrypt(input: {
   }
 
   // 2. Determination of candidates capable of decrypting the message
+
   const matchedRecords = await findMatchingKeyRecords(parsedMessage, keyRecords);
   if (matchedRecords.length === 0) {
     throw new Error("No imported OpenPGP key matches the recipients of this encrypted message.");
@@ -114,7 +115,8 @@ export async function findMatchingKeyRecords(
 ): Promise<KeyRecord[]> {
   // 1. Extract the Key IDs (in uppercase hexadecimal) used to encrypt the message
   const encryptionKeyIds = parsedMessage.getEncryptionKeyIDs().map(id => id.toHex().toUpperCase());
-  
+  console.log('encryptionKeyIds:', encryptionKeyIds);
+  console.log('keyRecords:', keyRecords);
   const matches: KeyRecord[] = [];
 
   for (const record of keyRecords) {

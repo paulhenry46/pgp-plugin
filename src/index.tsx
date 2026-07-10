@@ -22,10 +22,10 @@ import { pgpDecrypt, normalizePgpMessage, PgpKeyLockedError } from './pgp/decryp
 import { detectPgp } from './pgp/detect.ts'; 
 import { parseMime } from './mime/parse.ts';
 import { extractKeyInfo, scanAndImportKeysFromAttachments } from './pgp/key-utils.ts';
-import { clearArmoredPrivateKeyToPrivateKey } from './util.ts';
+import { clearArmoredPrivateKeyToPrivateKey, fetchBlobAsDataUrl, generateUUID } from './util.ts';
 import {
   saveKeyRecord, listKeyRecords, deleteKeyRecord, listPublicCerts, deletePublicCert,
-  saveSessionKeys, getSessionKeys, deleteSessionKeys, clearSessionKeys, KeyRecord, PublicCert
+  saveSessionKeys, getSessionKeys, deleteSessionKeys, clearSessionKeys, KeyRecord, PublicCert, getDefaultPublicCert
 } from './storage.ts';
 
  import {EmailSecuBanner, EmailBanner} from './ui/banners.tsx';
@@ -329,18 +329,225 @@ email: string;
 fingerprint: string;
 }
 
+ export async function onBeforeBlobUpload(fileId: string) {
+  const file = await host.upfiles.get(fileId);
+  if (!file) return;
+  // Get the pub key
+  const key = (await getDefaultPublicCert())?.publicKey
+  if (!key) {
+    host.toast.error('No default public key found for attachment encryption. Please set a default public key in OpenPGP settings.');  
+    return}
+  const fileBytes = await file.bytes();
+  const encryptedBlob: Blob = await pgpEncrypt(
+      fileBytes, 
+      [], 
+      key
+      
+    );
+  const encryptedFile = new File([encryptedBlob], `encrypted.pgp`, {
+      type: 'application/octet-stream'
+    });
+    
+    return await host.upfiles.save(fileId, encryptedFile);
+}
 
+
+export interface AlmostSavedDraft{
+   to: string[],
+    subject: string,
+    body: string,
+    cc?: string[],
+    bcc?: string[],
+    identityId?: string,
+    fromEmail?: string,
+    draftId?: string,
+    attachments?: Array<{ blobId: string; name: string; type: string; size: number; disposition?: 'attachment' | 'inline'; cid?: string }>,
+    fromName?: string,
+    htmlBody?: string
+}
+
+ export async function onBeforeDraftAutoSave(draft: AlmostSavedDraft): Promise<AlmostSavedDraft> {
+  // pub key
+  const key = (await getDefaultPublicCert())?.publicKey || '';
+  console.log('Default public key for draft auto-save:', key);
+  const modifiedDraft = JSON.parse(JSON.stringify(draft)) as AlmostSavedDraft;
+
+  // Si aucun attachement, on retourne le draft tel quel
+  if (modifiedDraft.attachments && modifiedDraft.attachments.length > 0) {
+
+  // 1. Initialisation de la table de correspondance
+  const metadataMap: Record<string, { originalName: string; originalType: string }> = {};
+
+  // 2. Parcours et modification des pièces jointes
+  modifiedDraft.attachments = modifiedDraft.attachments.map((attachement) => {
+    const randomName = `${generateUUID()}`; // Exemple: "550e8400-e29b-41d4-a716-446655440000"
+    
+    // On sauvegarde les vraies infos en liant au blobId (ou au randomName, mais le blobId reste stable)
+    metadataMap[randomName] = {
+      originalName: attachement.name,
+      originalType: attachement.type
+    };
+
+    // On anonymise l'attachement qui sera visible par le serveur
+    return {
+      ...attachement,
+      name: randomName,
+      type: 'application/octet-stream'
+    };
+  });
+
+  // 3. Préparation du bloc JSON de métadonnées avec ses balises uniques
+  const metadataJson = JSON.stringify(metadataMap);
+  const metadataPayload = `\n<--PGP_METADATA_START-->${metadataJson}<--PGP_METADATA_END-->`;
+
+  // 4. Injection à la fin du body textuel
+  modifiedDraft.body = (modifiedDraft.body || '') + metadataPayload;
+  }
+  const encoder = new TextEncoder();
+  const bodyBytes = encoder.encode(modifiedDraft.body);
+
+  const encryptedBodyBlob = await pgpEncrypt(
+      bodyBytes, 
+      [], 
+      key
+    );
+  modifiedDraft.body = await encryptedBodyBlob.text();
+
+  if (modifiedDraft.htmlBody) {
+    const encoder = new TextEncoder();
+    const htmlBytes = encoder.encode(modifiedDraft.htmlBody);
+    
+    // Appel de votre fonction pgpEncrypt
+    const encryptedHtmlBlob = await pgpEncrypt(
+      htmlBytes, 
+      [], 
+      key
+    );
+    
+    modifiedDraft.htmlBody = await encryptedHtmlBlob.text();
+  }
+
+  return modifiedDraft;
+} 
+
+export async function onBeforeEditDraft(email: any): Promise<any> {
+  console.log('Editing draft email:', email);
+  // 1. Cloner l'objet pour éviter de muter l'original de manière imprévue
+  const modifiedEmail = { ...email };
+  const { keyRecords, unlockedKeys } = await unlockedDecryptMaps();
+  console.log(keyRecords, unlockedKeys);
+  const decoder = new TextDecoder('utf-8');
+  const encoder = new TextEncoder();
+  const indexText = modifiedEmail.textBody[0].partId;
+  const indexHtml = modifiedEmail.htmlBody[0].partId;
+  // --- DÉCHIFFREMENT DU CORPS TEXTE (Clé 1) ---
+  const encryptedText = modifiedEmail.bodyValues?.[indexText]?.value;
+  if (encryptedText) {
+    const encryptedTextBytes = encoder.encode(encryptedText);   
+
+    const decryptedTextResult = await pgpDecrypt({
+      cmsBytes: encryptedTextBytes,
+      keyRecords: keyRecords,       
+      unlockedKeys: unlockedKeys,   
+      knownPublicKeys: []              
+    });
+
+    let text = decoder.decode(decryptedTextResult.mimeBytes);
+    console.log('Decrypted text body:', text);
+    // --- RESTAURATION DES ATTACHEMENTS ---
+    if (modifiedEmail.hasAttachment) {
+      const metadataRegex = /<--PGP_METADATA_START-->([\s\S]*?)<--PGP_METADATA_END-->/;
+      const match = text.match(metadataRegex);
+
+      if (match && match[1]) {
+        try {
+          const metadataMap: Record<string, { originalName: string; originalType: string }> = JSON.parse(match[1].trim());
+
+          // Restauration dans bodyStructure.subParts (Index >= 1)
+          if (modifiedEmail.bodyStructure && Array.isArray(modifiedEmail.bodyStructure.subParts)) {
+            modifiedEmail.bodyStructure.subParts = modifiedEmail.bodyStructure.subParts.map((subPart: any, index: number) => {
+              if (index >= 1 && subPart.blobId) {
+                const meta = metadataMap[subPart.blobId];
+                if (meta) {
+                  return {
+                    ...subPart,
+                    name: meta.originalName,
+                    type: meta.originalType
+                  };
+                }
+              }
+              return subPart;
+            });
+          }
+
+          // Restauration dans la liste racine des attachments
+          if (Array.isArray(modifiedEmail.attachments)) {
+            modifiedEmail.attachments = modifiedEmail.attachments.map((attachment: any) => {
+              if (attachment.blobId && metadataMap[attachment.blobId]) {
+                return {
+                  ...attachment,
+                  name: metadataMap[attachment.blobId].originalName,
+                  type: metadataMap[attachment.blobId].originalType
+                };
+              }
+              return attachment;
+            });
+          }
+
+          // Nettoyage final du texte : suppression du JSON et de ses balises
+          text = text.replace(metadataRegex, '').trim();
+
+        } catch (e) {
+          console.error("Erreur lors du parsing des métadonnées PGP :", e);
+        }
+      }
+    }
+
+    // Sauvegarde du texte nettoyé
+    modifiedEmail.bodyValues[indexText].value = text;
+  }
+  console.log('Modified text after all:', modifiedEmail.bodyValues[indexText].value);
+
+  // --- DÉCHIFFREMENT DU CORPS HTML (Clé 2) ---
+  const encryptedHtml = modifiedEmail.bodyValues?.[indexHtml]?.value;
+  if (encryptedHtml) {
+    const encryptedHtmlBytes = encoder.encode(encryptedHtml);  
+    
+    const decryptedHtmlResult = await pgpDecrypt({
+      cmsBytes: encryptedHtmlBytes,
+      keyRecords: keyRecords,       
+      unlockedKeys: unlockedKeys,   
+      knownPublicKeys: []             
+    });
+
+    modifiedEmail.bodyValues[indexHtml].value = decoder.decode(decryptedHtmlResult.mimeBytes);
+  }
+console.log('Modified email after decryption and restoration:', modifiedEmail);
+  return modifiedEmail;
+}
+
+interface Attachment {
+  name: string;
+  type: string;
+  size: number;
+  blobId: string;
+}
+
+/**
+ * Main entry point for rendering PGP-processed email bodies.
+ */
 export async function onRenderEmailBody(body: any, ctx: any) {
-  if (!ctx) return undefined;
-  if (!(await isCapable())) return undefined;
+  console.log(ctx, body);
+  if (!ctx || !(await isCapable())) return undefined;
+
   await host.storage.set(VERIFY_PREFIX + ctx.id, { isEncrypted: null, processing: true });
 
-  const detection = detectPgp(ctx.contentType, ctx.bodyStructure, ctx.attachments, ctx.textBody);
+  const detection = detectPgp(ctx.contentType, ctx.bodyStructure, ctx.bodyValues, ctx.attachments, ctx.textBody);
   if (!detection.type) return undefined;
 
   if (!detection.supported) {
     const status = {
-      isSigned: detection.type === 'pgp-signature-file' || detection.type === 'pgp-mime-signed',
+      isSigned: ['pgp-signature-file', 'pgp-mime-signed'].includes(detection.type),
       isEncrypted: false,
       unsupportedReason: `Unsupported OpenPGP layout (${detection.type})`,
     };
@@ -355,145 +562,37 @@ export async function onRenderEmailBody(body: any, ctx: any) {
 
   try {
     const raw = await host.jmap.fetchBlob(blobId);
-    console.log(raw);
     const pgpMessageContent = normalizePgpMessage(raw);
+    const isEncryptedCase = ['pgp-mime-encrypted', 'pgp-inline-encrypted', 'pgp-encrypted-file'].includes(detection.type);
+    const isSignedCase = ['pgp-mime-signed', 'pgp-inline-signed', 'pgp-signature-file'].includes(detection.type);
 
-    // ── Case 1 : encrypted and meybe signed ──
-    if (detection.type === 'pgp-mime-encrypted' || detection.type === 'pgp-inline-encrypted' || detection.type === 'pgp-encrypted-file') {
+    // Contextually shared keys
+    const knownPublicKeys = await loadPublicKeys(fromEmail);
+
+    // ── Case 1 : Encrypted (And potentially signed) ──
+    if (isEncryptedCase) {
       const { keyRecords, unlockedKeys } = await unlockedDecryptMaps();
-      
-      // 1. Load the sender's public keys (or the keyring) beforehand
-      const publicCerts = await listPublicCerts(fromEmail);
-      const knownPublicKeys = [];
-      for (const cert of publicCerts) {
-        try {
-          const readK = await openpgp.readKey({ armoredKey: cert.publicKey });
-          knownPublicKeys.push(readK);
-        } catch (e) { /* invalid key, ignore */ }
-      }
 
-      let result;
-      try {
-        // 2. Call pgpDecrypt while passing knownPublicKeys
-        result = await pgpDecrypt({ 
-          cmsBytes: new TextEncoder().encode(pgpMessageContent), 
-          keyRecords, 
-          unlockedKeys,
-          knownPublicKeys // 💡 Transmis ici
-        });
-      } catch (err) {
-        if (err instanceof PgpKeyLockedError) {
-          const status = { isEncrypted: true, decryptionSuccess: false, decryptionError: 'locked' };
-          await persistVerifyStatus(ctx.id, status);
-          return {
-            ...body,
-            handledBy: 'openpgp',
-            html: '',
-            text: '',
-            attachments: [],
-            verification: status,
-          };
-        }
-        const status = { isEncrypted: true, decryptionSuccess: false, decryptionError: String(err) };
-        
-        await persistVerifyStatus(ctx.id, status);
-        return {
-          ...body,
-          handledBy: 'openpgp',
-          html: `Could not decrypt this PGP message: ${status.decryptionError}`,
-          text: `Could not decrypt this PGP message: ${status.decryptionError}`,
-          attachments: [],
-          verification: status,
-        };
+      if (detection.type === 'pgp-inline-encrypted') {
+        return await handleInlineEncrypted(body, ctx, detection, keyRecords, unlockedKeys, knownPublicKeys);
+      } else {
+        return await handleMimeEncrypted(body, ctx, pgpMessageContent, keyRecords, unlockedKeys, knownPublicKeys, fromEmail);
       }
-      let innerBytes = result.mimeBytes;
-      const verification: Verification = { isEncrypted: true, 
-                            decryptionSuccess: true, 
-                            isSigned: false,
-                            signatureValid:false,
-                            signatureError: null,
-                            signerCert:null,
-                          signerEmailMatch: null };
-      
-      // 3. Extract and validate the signature recovered during decryption
-      if (result.signatures && result.signatures.length > 0) {
-        console.log('result signature:',result.signatures);
-        verification.isSigned = true;
-        const sig = result.signatures[0];
-        
-        try {
-          // Waiting on the promise verifies the signature mathematically
-          await sig.verified; 
-          verification.signatureValid = true;
-          verification.signatureError = null;
-          
-          // Retrieve the hexadecimal ID of the signing key
-          const signerKeyID = sig.keyID.toHex().toUpperCase();
-          
-          // Check whether we have this key's metadata for the UI
-          let signingKey = knownPublicKeys.find(key => key.getKeyID().toHex().toUpperCase() === signerKeyID);
-          if (signingKey) {
-             const keyInfo = await extractKeyInfo(signingKey);
-             verification.signerCert = {
-               id: `signer-${keyInfo.fingerprint.replace(/:/g, '')}`,
-               email: (keyInfo.emailAddresses[0] ?? '').toLowerCase(),
-               fingerprint: keyInfo.fingerprint
-             };
-             verification.signerEmailMatch = fromEmail.toLowerCase().trim() === verification.signerCert.email;
-             
-             // Automatic import if configured
-             
-          } else {
-             verification.signatureValid = false;
-             verification.signatureError = `Unknown public key or missing from the keyring (Key ID: ${signerKeyID}).`;
-          }
-        } catch (sigErr) {
-          verification.signatureValid = false;
-          verification.signatureError = sigErr instanceof Error ? sigErr.message : String(sigErr);
-        }
-      }
-
-      // 4. Continue parsing the clean internal MIME structure
-      const parsed = parseMime(innerBytes);
-      await persistVerifyStatus(ctx.id, verification);
-      if (parsed.attachments) {
-        await scanAndImportKeysFromAttachments(parsed.attachments);
-      }
-      return {
-        ...body,
-        handledBy: 'openpgp',
-        html: parsed.html || '',
-        text: parsed.text || '',
-        attachments: parsed.attachments,
-        verification,
-      };
     }
 
-    // ── Case 2: just signed ──
-    if (detection.type === 'pgp-mime-signed' || detection.type === 'pgp-inline-signed' || detection.type === 'pgp-signature-file') {
-      
-      // TS compiles correctly because signatureBlobId is now defined in the PgpDetectionResult interface
+    // ── Case 2: Signed Only ──
+    if (isSignedCase) {
       const signatureBlock = detection.signatureBlobId ? await host.jmap.fetchBlob(detection.signatureBlobId) : null;
       const signatureString = signatureBlock ? new TextDecoder().decode(signatureBlock) : null;
 
-      const publicCerts = await listPublicCerts(fromEmail);
-        const knownPublicKeys = [];
-        for (const cert of publicCerts) {
-          try {
-            const readK = await openpgp.readKey({ armoredKey: cert.publicKey });
-            knownPublicKeys.push(readK);
-          } catch (e) { /* invalid key, ignore */ }
-        }
-        console.log('pub certs:' ,knownPublicKeys);
-      
       const v = await pgpVerify(new TextEncoder().encode(pgpMessageContent), fromEmail, signatureString, knownPublicKeys);
-      
-      
       const parsed = parseMime(v.mimeBytes);
+
       await persistVerifyStatus(ctx.id, v.status);
       if (parsed.attachments) {
         await scanAndImportKeysFromAttachments(parsed.attachments);
       }
+
       return {
         ...body,
         handledBy: 'openpgp',
@@ -511,12 +610,235 @@ export async function onRenderEmailBody(body: any, ctx: any) {
   return undefined;
 }
 
+// ── HELPER FUNCTIONS ──
+
+/**
+ * Loads and safe-reads public keys for a specific sender address.
+ */
+async function loadPublicKeys(fromEmail: string): Promise<any[]> {
+  const publicCerts = await listPublicCerts(fromEmail);
+  const knownPublicKeys = [];
+  for (const cert of publicCerts) {
+    try {
+      const readK = await openpgp.readKey({ armoredKey: cert.publicKey });
+      knownPublicKeys.push(readK);
+    } catch {
+      /* ignore malformed public certificates safely */
+    }
+  }
+  return knownPublicKeys;
+}
+
+/**
+ * Sub-handler dealing explicitly with inline encrypted content parsing and nested JSON metadata.
+ */
+async function handleInlineEncrypted(
+  body: any,
+  ctx: any,
+  detection: any,
+  keyRecords: any,
+  unlockedKeys: any,
+  knownPublicKeys: any[]
+) {
+  const decoder = new TextDecoder('utf-8');
+  let htmlBody = '';
+  let textBody = '';
+  let attachments = ctx.attachments;
+
+  if (detection.htmlBody) {
+    const htmlBytes = (await pgpDecrypt({
+      cmsBytes: new TextEncoder().encode(detection.htmlBody),
+      keyRecords,
+      unlockedKeys,
+      knownPublicKeys,
+    })).mimeBytes;
+    htmlBody = decoder.decode(htmlBytes);
+  }
+
+  if (detection.textBody) {
+    const textBytes = (await pgpDecrypt({
+      cmsBytes: new TextEncoder().encode(detection.textBody),
+      keyRecords,
+      unlockedKeys,
+      knownPublicKeys,
+    })).mimeBytes;
+    textBody = decoder.decode(textBytes);
+
+    const metadataRegex = /<--PGP_METADATA_START-->([\s\S]*?)<--PGP_METADATA_END-->/;
+    const match = textBody.match(metadataRegex);
+
+    if (match && match[1]) {
+      try {
+        const metadataMap: Record<string, { originalName: string; originalType: string }> = JSON.parse(match[1].trim());
+        console.log(metadataMap);
+        if (ctx.attachments) {
+          console.log(ctx.attachments);
+          const acc = [];
+
+          for(const att of ctx.attachments){
+            const meta = metadataMap[att.name];
+            if (meta) {
+
+              const decryptedData = (await pgpDecrypt({
+                    cmsBytes: await host.jmap.fetchBlob(att.blobId),
+                    keyRecords,
+                    unlockedKeys,
+                    knownPublicKeys,
+                  })).mimeBytes;
+
+                const dataUrl = await new Promise<string>((resolve, reject) => {
+                    const reader = new FileReader();
+                    
+                    reader.onloadend = () => {
+                      resolve(reader.result as string);
+                    };
+                    
+                    reader.onerror = () => {
+                      reject(reader.error);
+                    };
+                    
+                    reader.readAsDataURL(new Blob([decryptedData as BlobPart], { type: meta.originalType }));
+                  });
+
+                acc.push({
+                  name: meta.originalName,
+                  type: meta.originalType,
+                  size: att.size || 0,
+                  dataUrl: dataUrl,
+                });
+              }
+          }
+
+          attachments=acc
+
+        }
+        textBody = textBody.replace(metadataRegex, '').trim();
+      } catch (e) {
+        console.error('Erreur lors du parsing des métadonnées PGP :', e);
+      }
+    }
+  }
+  const verif = { isEncrypted: true, decryptionSuccess: true, isSigned: false }
+  await persistVerifyStatus(ctx.id, verif);
+
+  //TODO decode and transform to dataURL
+  console.log(attachments);
+  return {
+    ...body,
+    handledBy: 'openpgp',
+    html: htmlBody,
+    text: textBody,
+    attachments,
+    verification: verif,
+  };
+}
+
+/**
+ * Sub-handler dealing with standard PGP/MIME or standard file encryptions.
+ */
+async function handleMimeEncrypted(
+  body: any,
+  ctx: any,
+  pgpMessageContent: string,
+  keyRecords: any,
+  unlockedKeys: any,
+  knownPublicKeys: any[],
+  fromEmail: string
+) {
+  let result;
+  try {
+    result = await pgpDecrypt({
+      cmsBytes: new TextEncoder().encode(pgpMessageContent),
+      keyRecords,
+      unlockedKeys,
+      knownPublicKeys,
+    });
+  } catch (err) {
+    const isLocked = err instanceof PgpKeyLockedError;
+    const status = {
+      isEncrypted: true,
+      decryptionSuccess: false,
+      decryptionError: isLocked ? 'locked' : String(err),
+    };
+
+    await persistVerifyStatus(ctx.id, status);
+
+    const fallbackErrorMessage = `Could not decrypt this PGP message: ${status.decryptionError}`;
+    return {
+      ...body,
+      handledBy: 'openpgp',
+      html: isLocked ? '' : fallbackErrorMessage,
+      text: isLocked ? '' : fallbackErrorMessage,
+      attachments: [],
+      verification: status,
+    };
+  }
+
+  const verification: any = {
+    isEncrypted: true,
+    decryptionSuccess: true,
+    isSigned: false,
+    signatureValid: false,
+    signatureError: null,
+    signerCert: null,
+    signerEmailMatch: null,
+  };
+
+  if (result.signatures && result.signatures.length > 0) {
+    verification.isSigned = true;
+    const sig = result.signatures[0];
+
+    try {
+      await sig.verified;
+      verification.signatureValid = true;
+
+      const signerKeyID = sig.keyID.toHex().toUpperCase();
+      const signingKey = knownPublicKeys.find((key) => key.getKeyID().toHex().toUpperCase() === signerKeyID);
+
+      if (signingKey) {
+        const keyInfo = await extractKeyInfo(signingKey);
+        verification.signerCert = {
+          id: `signer-${keyInfo.fingerprint.replace(/:/g, '')}`,
+          email: (keyInfo.emailAddresses[0] ?? '').toLowerCase(),
+          fingerprint: keyInfo.fingerprint,
+        };
+        verification.signerEmailMatch = fromEmail.toLowerCase().trim() === verification.signerCert.email;
+      } else {
+        verification.signatureValid = false;
+        verification.signatureError = `Unknown public key or missing from the keyring (Key ID: ${signerKeyID}).`;
+      }
+    } catch (sigErr) {
+      verification.signatureValid = false;
+      verification.signatureError = sigErr instanceof Error ? sigErr.message : String(sigErr);
+    }
+  }
+
+  const parsed = parseMime(result.mimeBytes);
+  await persistVerifyStatus(ctx.id, verification);
+
+  if (parsed.attachments) {
+    await scanAndImportKeysFromAttachments(parsed.attachments);
+  }
+
+  return {
+    ...body,
+    handledBy: 'openpgp',
+    html: parsed.html || '',
+    text: parsed.text || '',
+    attachments: parsed.attachments,
+    verification,
+  };
+}
+
 
 // ─── Exports ───────────────────────────────────────────────────────────
 
 export const hooks = {
   onComposeSend,
   onRenderEmailBody,
+  onBeforeEditDraft,
+  onBeforeDraftAutoSave,
+  onBeforeBlobUpload,
   async onAfterLogout() {
     if (settings().lockOnLogout === false) return;
     try { await clearSessionKeys(); } catch (err) { host.log.warn('clearSessionKeys failed', err); }

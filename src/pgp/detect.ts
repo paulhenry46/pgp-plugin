@@ -3,25 +3,35 @@
  * Checks Content-Type, JMAP bodyStructure, attachment metadata, and inline text.
  */
 
+import { extractEmailContent } from "../util.ts";
+
 export interface PgpDetectionResult {
   type: 'pgp-inline-encrypted' | 'pgp-inline-signed' | 'pgp-mime-encrypted' | 'pgp-mime-signed' | 'pgp-encrypted-file' | 'pgp-signature-file' | null;
   supported: boolean;
   blobId?: string | null;
   partId?: string | null;
   signatureBlobId?: string | null;
+  htmlBody?: string | null;
+  textBody?: string | null;
 }
 
-export function detectPgp(contentType: string, bodyStructure: any, attachments: any[], textBody: string): PgpDetectionResult {
+export function detectPgp(contentType: string, bodyStructure: any, bodyValues: any, attachments: any[], textBody: string): PgpDetectionResult {
   const noResult: PgpDetectionResult = { type: null, supported: false };
 
   // 1. Detection of PGP INLINE mode (Plain text body)
-  if (textBody && typeof textBody === 'string') {
-    if (textBody.includes('-----BEGIN PGP MESSAGE-----')) {
-      return { type: 'pgp-inline-encrypted', supported: true };
-    }
-    if (textBody.includes('-----BEGIN PGP SIGNED MESSAGE-----')) {
-      return { type: 'pgp-inline-signed', supported: true };
-    }
+
+  if (bodyValues) {
+      const { plainText, htmlText } = extractEmailContent(bodyStructure, bodyValues);
+      if (plainText && htmlText) {
+          if (plainText.includes('-----BEGIN PGP MESSAGE-----')) {
+            console.log('Detected PGP inline encrypted message in text body.');
+            return { type: 'pgp-inline-encrypted', supported: true, htmlBody: htmlText, textBody: plainText };
+          }
+          if (plainText.includes('-----BEGIN PGP SIGNED MESSAGE-----')) {
+            return { type: 'pgp-inline-signed', supported: true, htmlBody: htmlText, textBody: plainText };
+          }
+      }
+    
   }
 
   // 2. Detection via main Content-Type (PGP/MIME - RFC 3156)

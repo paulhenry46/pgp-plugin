@@ -1,4 +1,5 @@
 import * as openpgp from 'openpgp';
+import host from '@plugin-host';
 // Small browser helpers shared across the S/MIME plugin modules.
 // (The native app pulled these from @/lib/utils; the sandbox has no host
 // imports, so we provide local, dependency-free equivalents.)
@@ -89,4 +90,52 @@ export async function blobToBytes(blob: Blob): Promise<Uint8Array> {
 }
 export function bytesArrayBuffer(u8: Uint8Array) {
   return u8.buffer.slice(u8.byteOffset, u8.byteOffset + u8.byteLength) as ArrayBuffer;
+}
+
+
+export async function fetchBlobAsDataUrl(blobId: string, options?: { name?: string; type?: string }): Promise<string> {
+  // 1. Récupérer le Uint8Array
+  const bytes = await host.jmap.fetchBlob(blobId, options);
+
+  
+  
+  // 2. Spécifier le type MIME (par défaut application/octet-stream si non fourni)
+  const mimeType = options?.type || 'application/octet-stream';
+
+  // 3. Convertir en Data URL à l'aide de l'API FileReader
+  return new Promise((resolve, reject) => {
+    const blob = new Blob([bytes as BlobPart], { type: mimeType });
+    const reader = new FileReader();
+    
+    reader.onloadend = () => resolve(reader.result as string);
+    reader.onerror = () => reject(reader.error);
+    
+    reader.readAsDataURL(blob);
+  });
+}
+
+export function extractEmailContent(bodyStructure: any, bodyValues: any): { plainText: string | null, htmlText: string | null } {
+    let plainText = null;
+    let htmlText = null;
+
+    // Direct check if subParts exists and is an array
+    if (bodyStructure && Array.isArray(bodyStructure.subParts)) {
+        for (const part of bodyStructure.subParts) {
+            if (part.type === "text/plain" && bodyValues[part.partId]) {
+                plainText = bodyValues[part.partId].value;
+            } else if (part.type === "text/html" && bodyValues[part.partId]) {
+                htmlText = bodyValues[part.partId].value;
+            }else if(part.type === "multipart/alternative"){
+                for (const subpart of part.subParts) {
+                  if (subpart.type === "text/plain" && bodyValues[subpart.partId]) {
+                      plainText = bodyValues[subpart.partId].value;
+                  } else if (subpart.type === "text/html" && bodyValues[subpart.partId]) {
+                      htmlText = bodyValues[subpart.partId].value;
+                  }
+              }
+            }
+        }
+    }
+
+    return { plainText, htmlText };
 }
