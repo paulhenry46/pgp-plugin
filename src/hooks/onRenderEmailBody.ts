@@ -12,6 +12,7 @@ import {PREFS_KEY, INTENT_KEY, VERIFY_PREFIX, settings, STATE_PREFIX} from '../s
 import { listPublicCerts } from '../storage.ts';
 import {unlockedDecryptMaps} from '../util.ts';
 import { isCapable } from '../index.tsx';
+import { indexAndPersistDecryptedMail } from '../cache.ts';
 /**
  * Main entry point for rendering PGP-processed email bodies.
  */
@@ -238,6 +239,7 @@ async function handleInlineEncrypted(
 
   //TODO decode and transform to dataURL
   console.log(attachments);
+  await indexAndPersistDecryptedMail(ctx.id, textBody)
   return {
     ...body,
     handledBy: 'openpgp',
@@ -334,7 +336,7 @@ async function handleMimeEncrypted(
   if (parsed.attachments) {
     await scanAndImportKeysFromAttachments(parsed.attachments);
   }
-
+   await indexAndPersistDecryptedMail(ctx.id, parsed.text ||parsed.html || '');
   return {
     ...body,
     handledBy: 'openpgp',

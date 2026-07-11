@@ -9,10 +9,11 @@
  */
 
 const DB_NAME = 'pgp-plugin-store';
-const DB_VERSION = 2;
+const DB_VERSION = 3;
 const KEY_RECORDS_STORE = 'key-records';
 const PUBLIC_CERTS_STORE = 'public-certs';
 const SESSION_KEYS_STORE = 'session-keys';
+const MESSAGE_CACHE_STORE = 'message-cache';
 
 // ── Interfaces ──────────────────────────────────────
 
@@ -58,6 +59,18 @@ export interface SessionKeysEntry {
   unlockedPrivateKey: string; // ASCII Armored
   signingKey: string;          // ASCII Armored
   decryptionKey: string;       // ASCII Armored
+  aesKey: CryptoKey;
+}
+
+export interface EncryptedMessageCache {
+  id: string; // ID du mail (ex: UID IMAP ou Message-ID)
+  encryptedPayload: Uint8Array; // Contient le JSON { preview, tokens } chiffré en AES
+  iv: Uint8Array; // IV unique pour ce mail précis
+}
+
+export interface DecryptedCachePayload {
+  preview: string;
+  tokens: string[];
 }
 
 // ── BDD ENGINE ───────────────────────────────────────
@@ -81,6 +94,9 @@ function openDB(): Promise<IDBDatabase> {
       }
       if (!db.objectStoreNames.contains(SESSION_KEYS_STORE)) {
         db.createObjectStore(SESSION_KEYS_STORE, { keyPath: 'id' });
+      }
+      if (!db.objectStoreNames.contains(MESSAGE_CACHE_STORE)) {
+        db.createObjectStore(MESSAGE_CACHE_STORE, { keyPath: 'id' });
       }
     };
     
@@ -177,4 +193,50 @@ export async function getDefaultPublicKeyForEncryption(): Promise<string | undef
     return defaultPrivateKey.publicKey;
   }
   return undefined;
+}
+
+// ── CRUD pour le Message Cache Chiffré ───────────────────────────────
+
+export async function saveMessageCache(cache: EncryptedMessageCache): Promise<void> {
+  const db = await openDB();
+  await txPromise<IDBValidKey>(db, MESSAGE_CACHE_STORE, 'readwrite', (s) => s.put(cache));
+}
+
+export async function getMessageCache(id: string): Promise<EncryptedMessageCache | undefined> {
+  const db = await openDB();
+  return txPromise<EncryptedMessageCache | undefined>(db, MESSAGE_CACHE_STORE, 'readonly', (s) => s.get(id));
+}
+
+export async function getAllMessageCache(): Promise<EncryptedMessageCache[]> {
+  const db = await openDB();
+  return txPromise<EncryptedMessageCache[]>(db, MESSAGE_CACHE_STORE, 'readonly', (s) => s.getAll());
+}
+
+export async function getMessageCacheBatch(ids: string[]): Promise<Record<string, EncryptedMessageCache>> {
+  const db = await openDB();
+  const tx = db.transaction(MESSAGE_CACHE_STORE, 'readonly');
+  const store = tx.objectStore(MESSAGE_CACHE_STORE);
+  
+  const results: Record<string, EncryptedMessageCache> = {};
+  
+  // Batch processing natif IndexedDB
+  await Promise.all(
+    ids.map(id => {
+      return new Promise<void>((resolve) => {
+        const req = store.get(id);
+        req.onsuccess = () => {
+          if (req.result) results[id] = req.result;
+          resolve();
+        };
+        req.onerror = () => resolve(); // On ignore silencieusement les erreurs individuelles
+      });
+    })
+  );
+  
+  return results;
+}
+
+export async function clearAllMessageCache(): Promise<void> {
+  const db = await openDB();
+  await txPromise<undefined>(db, MESSAGE_CACHE_STORE, 'readwrite', (s) => s.clear());
 }

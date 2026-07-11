@@ -1,8 +1,9 @@
-import { SessionKeysEntry } from '../storage.ts';
+import { DecryptedCachePayload, SessionKeysEntry } from '../storage.ts';
 
 const CHANNEL_NAME = 'pgp-session-bus';
 
 let _backgroundSessionKeys: Record<string, SessionKeysEntry> = {};
+let _ramDecryptedIndex: Record<string, { preview: string, tokens: string[] }> = {};
 
 type SessionMessage =
   | { type: 'PING_STATUS'; requestId: string }
@@ -11,7 +12,13 @@ type SessionMessage =
   | { type: 'KEY_UPDATED'; isUnlocked: boolean }
   | { type: 'CLEAR_KEY' }
   | { type: 'REQUEST_KEY_DATA'; requestId: string; keyId: string }
-  | { type: 'RESPONSE_KEY_DATA'; requestId: string; keyEntry: SessionKeysEntry | null };
+  | { type: 'RESPONSE_KEY_DATA'; requestId: string; keyEntry: SessionKeysEntry | null }
+  | { type: 'INITIALIZE_RAM_INDEX'; decryptedIndex: Record<string, DecryptedCachePayload> }
+  | { type: 'REQUEST_PREVIEWS_BATCH'; requestId: string; emailIds: string[] }
+  | { type: 'RESPONSE_PREVIEWS_BATCH'; requestId: string; previews: Record<string, string> }
+  | { type: 'REQUEST_SEARCH'; requestId: string; query: string }
+  | { type: 'RESPONSE_SEARCH'; requestId: string; matchingIds: string[] }
+  | { type: 'UPDATE_RAM_INDEX_ENTRY'; id: string; payload: DecryptedCachePayload };
 
 export function initBackgroundSessionListener(): void {
   const channel = new BroadcastChannel(CHANNEL_NAME);
@@ -45,6 +52,55 @@ export function initBackgroundSessionListener(): void {
           keyEntry: _backgroundSessionKeys[msg.keyId] || null
         });
         break;
+
+      case 'INITIALIZE_RAM_INDEX':
+        _ramDecryptedIndex = msg.decryptedIndex;
+        console.log(`[Background] Index RAM initialisé avec ${Object.keys(msg.decryptedIndex).length} messages.`);
+        break;
+
+      // 2. Traitement groupé des demandes de previews depuis le webmail
+      case 'REQUEST_PREVIEWS_BATCH': {
+        const previewsResult: Record<string, string> = {};
+        for (const id of msg.emailIds) {
+          if (_ramDecryptedIndex[id]) {
+            previewsResult[id] = _ramDecryptedIndex[id].preview;
+          }
+        }
+        channel.postMessage({
+          type: 'RESPONSE_PREVIEWS_BATCH',
+          requestId: msg.requestId,
+          previews: previewsResult
+        });
+        break;
+      }
+
+      // 3. Moteur de recherche exécuté directement côté Background RAM
+      case 'REQUEST_SEARCH': {
+        const cleanedQuery = msg.query.toLowerCase().trim(); // Normalisation basique
+        const matchingIds: string[] = [];
+
+        if (cleanedQuery) {
+          for (const [id, data] of Object.entries(_ramDecryptedIndex)) {
+            // Recherche par correspondance de jetons (Tokens)
+            const matches = data.tokens.some(token => token.includes(cleanedQuery));
+            if (matches) {
+              matchingIds.push(id);
+            }
+          }
+        }
+
+        channel.postMessage({
+          type: 'RESPONSE_SEARCH',
+          requestId: msg.requestId,
+          matchingIds
+        });
+        break;
+      }
+      case 'UPDATE_RAM_INDEX_ENTRY':
+      _ramDecryptedIndex[msg.id] = msg.payload;
+      console.log(`[Background] Entrée RAM mise à jour pour le mail : ${msg.id}`);
+      console.log(_ramDecryptedIndex);
+      break;
     }
   };
 }
@@ -121,4 +177,62 @@ export function subscribeToKeyUpdates(callback: (isUnlocked: boolean) => void): 
   };
 
   return () => channel.close();
+}
+
+export function broadcastInitializeRamIndex(decryptedIndex: Record<string, DecryptedCachePayload>): void {
+  const channel = new BroadcastChannel(CHANNEL_NAME);
+  channel.postMessage({ type: 'INITIALIZE_RAM_INDEX', decryptedIndex });
+  channel.close();
+}
+
+export function fetchPreviewsBatchFromBackground(emailIds: string[]): Promise<Record<string, string>> {
+  return new Promise((resolve) => {
+    const channel = new BroadcastChannel(CHANNEL_NAME);
+    const requestId = Math.random().toString(36).substring(2);
+
+    const timeout = setTimeout(() => {
+      channel.close();
+      resolve({});
+    }, 300); // Protection anti-blocage
+
+    channel.onmessage = (event: MessageEvent<SessionMessage>) => {
+      const msg = event.data;
+      if (msg.type === 'RESPONSE_PREVIEWS_BATCH' && msg.requestId === requestId) {
+        clearTimeout(timeout);
+        channel.close();
+        resolve(msg.previews);
+      }
+    };
+
+    channel.postMessage({ type: 'REQUEST_PREVIEWS_BATCH', requestId, emailIds });
+  });
+}
+
+export function executeSearchInBackground(query: string): Promise<string[]> {
+  return new Promise((resolve) => {
+    const channel = new BroadcastChannel(CHANNEL_NAME);
+    const requestId = Math.random().toString(36).substring(2);
+
+    const timeout = setTimeout(() => {
+      channel.close();
+      resolve([]);
+    }, 500);
+
+    channel.onmessage = (event: MessageEvent<SessionMessage>) => {
+      const msg = event.data;
+      if (msg.type === 'RESPONSE_SEARCH' && msg.requestId === requestId) {
+        clearTimeout(timeout);
+        channel.close();
+        resolve(msg.matchingIds);
+      }
+    };
+
+    channel.postMessage({ type: 'REQUEST_SEARCH', requestId, query });
+  });
+}
+
+export function broadcastUpdateRamIndexEntry(id: string, payload: DecryptedCachePayload): void {
+  const channel = new BroadcastChannel(CHANNEL_NAME);
+  channel.postMessage({ type: 'UPDATE_RAM_INDEX_ENTRY', id, payload });
+  channel.close();
 }

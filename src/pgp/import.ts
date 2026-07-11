@@ -10,9 +10,9 @@ import * as openpgp from 'openpgp';
 import { generateUUID } from '../util.ts';
 import { extractKeyInfo } from './key-utils.ts';
 import { KeyRecord, listPublicCerts, savePublicCert } from '../storage.ts';
+import { KDF_ITERATIONS, AES_KEY_LENGTH } from '../shared.ts';
+import { deriveAesKeyFromPgpParams, getIndex } from '../cache.ts';
 
-const KDF_ITERATIONS = 600_000;
-const AES_KEY_LENGTH = 256;
 
 // ── Definitions & Interfaces ──────────────────────────────────────────
 
@@ -26,6 +26,7 @@ interface UnlockResult {
   unlockedPrivateKey: string;
   signingKey: string;
   decryptionKey: string;
+  aesKey: CryptoKey;
 }
 
 // ── Main Core Functions ───────────────────────────────────────────────
@@ -126,6 +127,7 @@ export async function importOpenPgpPrivateKey(
  * @param passphrase - The storage password defined by the user
  */
 export async function unlockPrivateKey(record: KeyRecord, passphrase: string): Promise<UnlockResult> {
+  // 1. Dérivation de la clé de déballage pour la clé PGP
   const wrappingKey = await deriveWrappingKey(passphrase, record.salt, record.kdfIterations);
 
   let rawTextBytes: ArrayBuffer;
@@ -140,12 +142,9 @@ export async function unlockPrivateKey(record: KeyRecord, passphrase: string): P
   }
 
   const armoredPrivateKeyText = new TextDecoder().decode(rawTextBytes);
-  
-  // Read and load the OpenPGP private key object
   const parsedKey = await openpgp.readKey({ armoredKey: armoredPrivateKeyText });
   let openPgpPrivateKey = parsedKey as openpgp.PrivateKey;
 
-  // If the internal PGP private key itself has a passphrase, we unlock it
   if (!openPgpPrivateKey.isDecrypted()) {
     try {
       openPgpPrivateKey = await openpgp.decryptKey({
@@ -156,11 +155,14 @@ export async function unlockPrivateKey(record: KeyRecord, passphrase: string): P
       throw new Error(`Failed to decrypt internal OpenPGP packets: ${err.message}`);
     }
   }
+  const aesKey = await deriveAesKeyFromPgpParams(passphrase, record.salt, record.kdfIterations);
+  await getIndex(aesKey, passphrase, record);
 
   return {
     unlockedPrivateKey: openPgpPrivateKey.armor(),
     signingKey: openPgpPrivateKey.armor(),
-    decryptionKey: openPgpPrivateKey.armor()
+    decryptionKey: openPgpPrivateKey.armor(),
+    aesKey // Retourné pour le composant UI et le Broadcast
   };
 }
 

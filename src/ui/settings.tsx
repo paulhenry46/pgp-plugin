@@ -107,13 +107,14 @@ export function SettingsSection() {
     }
     setBusy(true);
     try {
-      const { unlockedPrivateKey, signingKey, decryptionKey } = await unlockPrivateKey(rec, unlockPassphrase);
+      const { unlockedPrivateKey, signingKey, decryptionKey, aesKey } = await unlockPrivateKey(rec, unlockPassphrase);
       
       broadcastUnlockKey({ 
         id: rec.id, 
         unlockedPrivateKey, 
         signingKey, 
-        decryptionKey 
+        decryptionKey ,
+        aesKey: aesKey,
       });
       
       host.toast.success(`Unlocked ${rec.email || 'key'}`);
