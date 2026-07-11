@@ -1,3 +1,4 @@
+import { getPreview, search } from '../cache.ts';
 import { DecryptedCachePayload, SessionKeysEntry } from '../storage.ts';
 
 const CHANNEL_NAME = 'pgp-session-bus';
@@ -60,39 +61,20 @@ export function initBackgroundSessionListener(): void {
 
       // 2. Traitement groupé des demandes de previews depuis le webmail
       case 'REQUEST_PREVIEWS_BATCH': {
-        const previewsResult: Record<string, string> = {};
-        for (const id of msg.emailIds) {
-          if (_ramDecryptedIndex[id]) {
-            previewsResult[id] = _ramDecryptedIndex[id].preview;
-          }
-        }
         channel.postMessage({
           type: 'RESPONSE_PREVIEWS_BATCH',
           requestId: msg.requestId,
-          previews: previewsResult
+          previews: getPreview(msg.emailIds, _ramDecryptedIndex)
         });
         break;
       }
 
       // 3. Moteur de recherche exécuté directement côté Background RAM
       case 'REQUEST_SEARCH': {
-        const cleanedQuery = msg.query.toLowerCase().trim(); // Normalisation basique
-        const matchingIds: string[] = [];
-
-        if (cleanedQuery) {
-          for (const [id, data] of Object.entries(_ramDecryptedIndex)) {
-            // Recherche par correspondance de jetons (Tokens)
-            const matches = data.tokens.some(token => token.includes(cleanedQuery));
-            if (matches) {
-              matchingIds.push(id);
-            }
-          }
-        }
-
         channel.postMessage({
           type: 'RESPONSE_SEARCH',
           requestId: msg.requestId,
-          matchingIds
+          matchingIds: search(msg.query, _ramDecryptedIndex)
         });
         break;
       }

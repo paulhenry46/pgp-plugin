@@ -145,3 +145,30 @@ export async function indexAndPersistDecryptedMail(
     throw error;
   }
 }
+
+export function search(query: string, index: Record<string, DecryptedCachePayload>): string[] {
+    const cleanedQuery = query.toLowerCase().trim(); // Normalisation basique
+        const matchingIds: string[] = [];
+
+        if (cleanedQuery) {
+          for (const [id, data] of Object.entries(index)) {
+            // Recherche par correspondance de jetons (Tokens)
+            const matches = data.tokens.some(token => token.includes(cleanedQuery));
+            if (matches) {
+              matchingIds.push(id);
+            }
+          }
+        }
+        return matchingIds;
+}
+
+export function getPreview(emailIds: string[], index: Record<string, DecryptedCachePayload>): Record<string, string> {
+
+    const previewsResult: Record<string, string> = {};
+        for (const id of emailIds) {
+          if (index[id]) {
+            previewsResult[id] = index[id].preview;
+          }
+        }
+        return previewsResult;
+}
