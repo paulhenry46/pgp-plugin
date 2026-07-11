@@ -36,6 +36,7 @@ export interface KeyRecord {
     canSign: boolean;
     canEncrypt: boolean;
   };
+  default?: boolean;
 }
 
 export interface PublicCert {
@@ -150,8 +151,30 @@ export async function deletePublicCert(id: string): Promise<void> {
   await txPromise<undefined>(db, PUBLIC_CERTS_STORE, 'readwrite', (s) => s.delete(id));
 }
 
-export async function getDefaultPublicCert(): Promise<PublicCert | undefined> {
+export async function setDefaultKeyRecord(targetId: string, isChecked: boolean): Promise<void> {
   const db = await openDB();
-  const all = await txPromise<PublicCert[]>(db, PUBLIC_CERTS_STORE, 'readonly', (s) => s.getAll());
-  return all.find((c) => c.default === true);
+  const all = await txPromise<KeyRecord[]>(db, KEY_RECORDS_STORE, 'readonly', (s) => s.getAll());
+  
+  await Promise.all(
+    all.map((k) => {
+      const isCurrent = k.id === targetId;
+      return txPromise<IDBValidKey>(db, KEY_RECORDS_STORE, 'readwrite', (s) => 
+        s.put({
+          ...k,
+          default: isCurrent ? isChecked : (isChecked ? false : k.default)
+        })
+      );
+    })
+  );
+}
+
+export async function getDefaultPublicKeyForEncryption(): Promise<string | undefined> {
+  const db = await openDB();
+  const allKeys = await txPromise<KeyRecord[]>(db, KEY_RECORDS_STORE, 'readonly', (s) => s.getAll());
+  const defaultPrivateKey = allKeys.find((k) => k.default === true);
+  
+  if (defaultPrivateKey) {
+    return defaultPrivateKey.publicKey;
+  }
+  return undefined;
 }

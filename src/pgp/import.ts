@@ -44,7 +44,7 @@ export async function importOpenPgpPrivateKey(
     throw new Error('Invalid OpenPGP private key: text block required');
   }
 
-  // 1. Parse the key with OpenPGP and attempt to decrypt it with the currentPassphrase
+  // 1. Parse & Decrypt
   let privateKey: openpgp.Key;
   try {
     privateKey = await openpgp.readKey({ armoredKey: armoredPrivateKeyText });
@@ -52,14 +52,11 @@ export async function importOpenPgpPrivateKey(
       throw new Error('The provided block is a public key, not a private key');
     }
 
-    // If the key is encrypted (protected), we attempt to decrypt it with the provided passphrase
     if (!privateKey.isDecrypted()) {
       const decryptedKey = await openpgp.decryptKey({
         privateKey,
         passphrase: currentPassphrase
       });
-      
-      // We ensure that decryption succeeded (OpenPGPjs returns the decrypted key)
       if (!decryptedKey) {
         throw new Error('Invalid passphrase for this OpenPGP private key');
       }
@@ -68,20 +65,18 @@ export async function importOpenPgpPrivateKey(
     throw new Error(`OpenPGP key validation failed: ${err.message}`);
   }
 
-  // 2. Extract key metadata to populate the data model expected by the UI
+  // 2. Extract metadata
   const keyInfo = (await extractKeyInfo(privateKey)) as any;
-  console.log('keyinfo:', keyInfo);
   const email = (keyInfo.emailAddresses?.[0] ?? '').toLowerCase();
-  console.log(email);
   if (!email) {
     throw new Error('OpenPGP private key must be bound to at least one valid email User ID');
   }
 
-  // 3. Encrypt the plain text block of the private key for local storage (at-rest)
+  // 3. Encrypt private key for at-rest storage
   const textBytes = new TextEncoder().encode(armoredPrivateKeyText);
   const { encrypted, salt, iv } = await encryptPrivateKeyData(textBytes.buffer, storagePassphrase);
 
-  // 4. Generate the final record perfectly aligned with the KeyRecord interface
+  // 4. Generate KeyRecord
   const keyRecord: KeyRecord = {
     id: generateUUID(),
     email,
@@ -102,6 +97,25 @@ export async function importOpenPgpPrivateKey(
       canEncrypt: keyInfo.capabilities?.canEncrypt !== false
     }
   };
+
+  if (keyInfo.armoredPublicKey) {
+    const existingCerts = await listPublicCerts();
+    const alreadyExists = existingCerts.some((c) => c.fingerprint === keyInfo.fingerprint);
+    
+    if (!alreadyExists) {
+      await savePublicCert({
+        id: generateUUID(),
+        email,
+        publicKey: keyInfo.armoredPublicKey,
+        issuer: keyRecord.issuer,
+        subject: keyRecord.subject,
+        notBefore: keyRecord.notBefore,
+        notAfter: keyRecord.notAfter,
+        fingerprint: keyRecord.fingerprint,
+        source: 'private-key',
+      });
+    }
+  }
 
   return { keyRecord, keyInfo };
 }

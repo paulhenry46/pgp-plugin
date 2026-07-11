@@ -2,7 +2,7 @@
 import { pgpEncrypt } from '../pgp/encrypt.ts';
 import {  generateUUID } from '../util.ts';
 import {
-  getDefaultPublicCert
+  getDefaultPublicKeyForEncryption
 } from '../storage.ts';
 import {settings} from '../shared.ts';
 
@@ -24,7 +24,8 @@ interface AlmostSavedDraft{
   if(settings().encryptDrafts !== true) return draft;
 
   // pub key
-  const key = (await getDefaultPublicCert())?.publicKey || '';
+  const key = await getDefaultPublicKeyForEncryption();
+  if(!key) return draft; // If no key is found, return the draft as is
   console.log('Default public key for draft auto-save:', key);
   const modifiedDraft = JSON.parse(JSON.stringify(draft)) as AlmostSavedDraft;
 

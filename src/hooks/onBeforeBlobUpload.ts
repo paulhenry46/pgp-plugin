@@ -2,7 +2,7 @@ import host from '@plugin-host';
 import { pgpEncrypt } from '../pgp/encrypt.ts';
 
 import {
-   getDefaultPublicCert
+   getDefaultPublicKeyForEncryption
 } from '../storage.ts';
 import {settings} from '../shared.ts';
  
@@ -12,7 +12,7 @@ import {settings} from '../shared.ts';
   const file = await host.upfiles.get(fileId);
   if (!file) return;
   // Get the pub key
-  const key = (await getDefaultPublicCert())?.publicKey
+  const key = await getDefaultPublicKeyForEncryption();
   if (!key) {
     host.toast.error('No default public key found for attachment encryption. Please set a default public key in OpenPGP settings.');  
     return}

@@ -4,7 +4,7 @@ const h = React.createElement;
 const { useState, useEffect, useCallback, useRef } = React;
 import {
   saveKeyRecord, listKeyRecords, deleteKeyRecord, listPublicCerts, deletePublicCert,
-  KeyRecord, PublicCert, savePublicCert
+  KeyRecord, PublicCert
 } from '../storage.ts';
 
 import { importOpenPgpPrivateKey, importOpenPgpPublicKey, unlockPrivateKey } from '../pgp/import.ts';
@@ -172,22 +172,22 @@ export function SettingsSection() {
     await refresh();
   }
 
-  async function handleSetDefaultCert(targetCert: PublicCert, isChecked: boolean) {
+  async function handleSetDefaultPrivateKey(targetKey: KeyRecord, isChecked: boolean) {
     setBusy(true);
     try {
       await Promise.all(
-        certs.map((c) => {
-          const isCurrent = c.id === targetCert.id;
-          return savePublicCert({
-            ...c,
-            default: isCurrent ? isChecked : (isChecked ? false : c.default)
+        keys.map((k) => {
+          const isCurrent = k.id === targetKey.id;
+          return saveKeyRecord({
+            ...k,
+            default: isCurrent ? isChecked : (isChecked ? false : k.default)
           });
         })
       );
       
       host.toast.success(
         isChecked 
-          ? `Clé de ${targetCert.email} définie par défaut` 
+          ? `Clé de ${targetKey.email} définie par défaut pour le chiffrement` 
           : `Clé par défaut retirée`
       );
       await refresh();
@@ -232,14 +232,26 @@ export function SettingsSection() {
         : h('div', { style: { display: 'flex', flexDirection: 'column', gap: '8px' } },
           keys.map((rec) => h('div', { key: rec.id, style: { ...card, display: 'flex', flexDirection: 'column', gap: '10px' } },
             h('div', { style: { display: 'flex', justifyContent: 'space-between', gap: '8px', flexWrap: 'wrap' } },
-              h('div', null,
-                h('div', { style: { fontWeight: 600, fontSize: '14px' } }, rec.email || rec.subject || 'OpenPGP User'),
-                h('div', { style: { fontSize: '12px', color: 'var(--color-muted-foreground, #64748b)' } },
-                  `${rec.algorithm} · created ${fmtDate(rec.notBefore)}${rec.notAfter ? ` · expires ${fmtDate(rec.notAfter)}` : ' · no expiration'}${isExpired(rec.notAfter) ? ' · EXPIRED' : ''}`),
-                h('div', { style: { fontSize: '11px', fontFamily: 'monospace', color: 'var(--color-muted-foreground, #64748b)', wordBreak: 'break-all' } },
-                  rec.fingerprint),
-                h('div', { style: { fontSize: '11px', color: 'var(--color-muted-foreground, #64748b)' } },
-                  `${rec.capabilities && rec.capabilities.canSign ? 'sign' : ''}${rec.capabilities && rec.capabilities.canSign && rec.capabilities.canEncrypt ? ' · ' : ''}${rec.capabilities && rec.capabilities.canEncrypt ? 'encrypt' : ''}`),
+              h('div', { style: { display: 'flex', alignItems: 'flex-start', gap: '12px' } },
+                h('input', {
+                  type: 'checkbox',
+                  checked: !!rec.default,
+                  disabled: busy,
+                  onChange: (e) => handleSetDefaultPrivateKey(rec, e.target.checked),
+                  style: { cursor: 'pointer', width: '16px', height: '16px', marginTop: '3px' }
+                }),
+                h('div', null,
+                  h('div', { style: { fontWeight: 600, fontSize: '14px' } }, 
+                    rec.email || rec.subject || 'OpenPGP User',
+                    rec.default && h('span', { style: { marginLeft: '8px', fontSize: '11px', padding: '2px 6px', borderRadius: '4px', background: 'var(--color-primary-smooth, #e0f2fe)', color: '#0369a1', fontWeight: 'normal' } }, 'Par défaut')
+                  ),
+                  h('div', { style: { fontSize: '12px', color: 'var(--color-muted-foreground, #64748b)' } },
+                    `${rec.algorithm} · created ${fmtDate(rec.notBefore)}${rec.notAfter ? ` · expires ${fmtDate(rec.notAfter)}` : ' · no expiration'}${isExpired(rec.notAfter) ? ' · EXPIRED' : ''}`),
+                  h('div', { style: { fontSize: '11px', fontFamily: 'monospace', color: 'var(--color-muted-foreground, #64748b)', wordBreak: 'break-all' } },
+                    rec.fingerprint),
+                  h('div', { style: { fontSize: '11px', color: 'var(--color-muted-foreground, #64748b)' } },
+                    `${rec.capabilities && rec.capabilities.canSign ? 'sign' : ''}${rec.capabilities && rec.capabilities.canSign && rec.capabilities.canEncrypt ? ' · ' : ''}${rec.capabilities && rec.capabilities.canEncrypt ? 'encrypt' : ''}`),
+                ),
               ),
               h('div', { style: { display: 'flex', gap: '6px', alignItems: 'flex-start' } },
                 unlocked[rec.id]
@@ -282,23 +294,18 @@ export function SettingsSection() {
         : h('div', { style: { display: 'flex', flexDirection: 'column', gap: '6px' } },
           certs.map((c) => h('div', { key: c.id, style: { ...card, display: 'flex', justifyContent: 'space-between', gap: '8px', alignItems: 'center' } },
             h('div', { style: { display: 'flex', alignItems: 'center', gap: '12px' } },
-              h('input', {
-                type: 'checkbox',
-                checked: !!c.default,
-                disabled: busy,
-                onChange: (e) => handleSetDefaultCert(c, e.target.checked),
-                style: { cursor: 'pointer', width: '16px', height: '16px' }
-              }),
               h('div', null,
                 h('div', { style: { fontWeight: 600, fontSize: '13px' } }, 
                   c.email || c.subject,
-                  c.default && h('span', { style: { marginLeft: '8px', fontSize: '11px', padding: '2px 6px', borderRadius: '4px', background: 'var(--color-primary-smooth, #e0f2fe)', color: '#0369a1', fontWeight: 'normal' } }, 'Par défaut')
+                  c.source === 'private-key' && h('span', { style: { marginLeft: '8px', fontSize: '11px', padding: '2px 6px', borderRadius: '4px', background: '#f1f5f9', color: '#475569', fontWeight: 'normal' } }, 'Own key')
                 ),
                 h('div', { style: { fontSize: '11px', color: 'var(--color-muted-foreground, #64748b)' } },
-                  `${c.source} · expires ${fmtDate(c.notAfter)}${isExpired(c.notAfter) ? ' · EXPIRED' : ''}`),
+                  `${c.source === 'private-key' ? 'Linked' : c.source} · expires ${fmtDate(c.notAfter)}${isExpired(c.notAfter) ? ' · EXPIRED' : ''}`),
               )
             ),
-            h('button', { type: 'button', style: { ...btn, color: 'var(--color-destructive, #dc2626)' }, disabled: busy, onClick: () => removeCert(c) }, 'Remove'),
+            c.source !== 'private-key' 
+              ? h('button', { type: 'button', style: { ...btn, color: 'var(--color-destructive, #dc2626)' }, disabled: busy, onClick: () => removeCert(c) }, 'Remove')
+              : h('div', { style: { fontSize: '12px', color: 'var(--color-muted-foreground, #64748b)', fontStyle: 'italic', paddingRight: '8px' } }, 'Linked to private key')
           )),
         ),
     ),
