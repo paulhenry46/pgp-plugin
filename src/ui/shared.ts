@@ -10,7 +10,6 @@ export const btn = {
   padding: '6px 12px',
   borderRadius: '6px',
   border: '0px solid var(--color-input, #cbd5e1)',
-  background: 'var(--color-muted, #f1f5f9)',
   color: 'var(--color-foreground, #0f172a)',
   cursor: 'pointer',
 };

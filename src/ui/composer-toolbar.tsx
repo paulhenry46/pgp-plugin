@@ -53,7 +53,7 @@ export function ComposerToolbar() {
   const pill = (active: boolean | undefined) => ({
     ...btn,
     background: active ? 'var(--color-accent, #25eb43)' : 'var(--color-background, #141516)',
-    color: active ? '#fff' : 'var(--color-foreground, #0f172a)',
+    color: active ? 'var(--color-accent-foreground, #ffffff)' : 'var(--color-foreground, #0f172a)',
   });
 
   if (!ready) {

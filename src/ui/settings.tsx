@@ -24,11 +24,6 @@ export function SettingsSection() {
   const [unlocked, setUnlocked] = useState<Record<string, boolean>>({});
   const [busy, setBusy] = useState<boolean>(false);
   const [capable, setCapable] = useState<boolean>(true);
-  const [unlockingKeyId, setUnlockingKeyId] = useState<string | null>(null);
-  const [unlockPassphrase, setUnlockPassphrase] = useState<string>('');
-  
-  const [hasPrivateFile, setHasPrivateFile] = useState<boolean>(false);
-  const [passphrase, setPassphrase] = useState<string>('');
   
   const fileRef = useRef<HTMLInputElement | null>(null);
   const certFileRef = useRef<HTMLInputElement | null>(null);
@@ -60,54 +55,57 @@ export function SettingsSection() {
     );
   }
 
-  function handleFileChange() {
-    const file = fileRef.current && fileRef.current.files && fileRef.current.files[0];
-    setHasPrivateFile(!!file);
-  }
-
-  async function importKeyFile() {
+  async function handleFileChange() {
     const file = fileRef.current && fileRef.current.files && fileRef.current.files[0];
     if (!file) return;
-    
-    if (!passphrase.trim()) {
-      host.toast.error('Please enter the OpenPGP passphrase to decrypt this private key.');
+
+    // Use host.ui.prompt to gather both the active key passphrase and an optional new storage passphrase
+    const result = await host.ui.prompt({
+      title: "Import Private Key",
+      message: "Provide the current passphrase to decrypt your OpenPGP file, and optionally set a new one for local storage optimization.",
+      fields: [
+        { name: 'currentPassphrase', label: 'Current Passphrase', type: 'password', required: true },
+        { name: 'storagePassphrase', label: 'New Storage Passphrase (Optional)', type: 'password', required: false }
+      ]
+    });
+
+    if (!result || !result.currentPassphrase) {
+      if (fileRef.current) fileRef.current.value = '';
       return;
     }
-    
+
+    const currentPass = result.currentPassphrase;
+    const storagePass = result.storagePassphrase?.trim() || currentPass;
+
     setBusy(true);
     try {
       const text = new TextDecoder().decode(await file.arrayBuffer());
-      const { keyRecord } = await importOpenPgpPrivateKey(text, passphrase, passphrase);
+      const { keyRecord } = await importOpenPgpPrivateKey(text, storagePass, currentPass);
       
       await saveKeyRecord(keyRecord);
       host.toast.success(`Imported OpenPGP key for ${keyRecord.email || 'identity'}`);
-
-      if (fileRef.current) fileRef.current.value = '';
-      setHasPrivateFile(false);
-      setPassphrase('');
-      
       await refresh();
     } catch (err) {
       const error = err as Error;
       host.toast.error(`Import failed: ${error?.message ? error.message : String(err)}`);
     } finally {
+      if (fileRef.current) fileRef.current.value = '';
       setBusy(false);
     }
   }
 
-  function initiateUnlock(rec: KeyRecord) {
-    setUnlockingKeyId(rec.id);
-    setUnlockPassphrase('');
-  }
+  async function initiateUnlock(rec: KeyRecord) {
+    const result = await host.ui.prompt({
+      title: "Unlock your key",
+      message: `Unlock your key (${rec.email || 'this identity'}) to unlock all features of the PGP plugin`,
+      fields: [{ name: 'passphrase', label: 'Passphrase', type: 'password', required: true }]
+    });
 
-  async function confirmUnlock(rec: KeyRecord) {
-    if (!unlockPassphrase.trim()) {
-      host.toast.error('Please enter your passphrase.');
-      return;
-    }
+    if (!result || !result.passphrase) return;
+
     setBusy(true);
     try {
-      const { unlockedPrivateKey, signingKey, decryptionKey, aesKey } = await unlockPrivateKey(rec, unlockPassphrase);
+      const { unlockedPrivateKey, signingKey, decryptionKey, aesKey } = await unlockPrivateKey(rec, result.passphrase);
       
       broadcastUnlockKey({ 
         id: rec.id, 
@@ -118,8 +116,6 @@ export function SettingsSection() {
       });
       
       host.toast.success(`Unlocked ${rec.email || 'key'}`);
-      setUnlockingKeyId(null);
-      setUnlockPassphrase('');
       await refresh();
     } catch (err) {
       const error = err as Error;
@@ -195,8 +191,8 @@ export function SettingsSection() {
       
       host.toast.success(
         isChecked 
-          ? `Clé de ${targetKey.email} définie par défaut pour le chiffrement` 
-          : `Clé par défaut retirée`
+          ? `Key ${targetKey.email} defined as default for encryption` 
+          : `Default key removed`
       );
       await refresh();
     } catch (err) {
@@ -208,7 +204,6 @@ export function SettingsSection() {
   }
 
   return h('div', { style: { display: 'flex', flexDirection: 'column', gap: '16px', maxWidth: '720px' } },
-    // Injection des styles CSS globaux
     h('style', null, `
       .composer-btn {
         display: inline-flex;
@@ -235,6 +230,54 @@ export function SettingsSection() {
       }
     `),
 
+    h('style', null, `
+      .trash-btn {
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        border-radius: 0.375rem;
+        font-weight: 500;
+        height: 2.25rem;
+        padding: 0 1rem;
+        cursor: pointer;
+        transition: all 150ms cubic-bezier(0.4, 0, 0.2, 1);
+        background-color: #f000;
+      }
+      .trash-btn:hover {
+        background-color: var(--color-accent, #2563eb) !important;
+        opacity: 1 !important;
+      }
+      .trash-btn:disabled {
+        opacity: 0.5 !important;
+        cursor: not-allowed;
+      }
+    `),
+
+    h('style', null, `
+      .lock-btn {
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        border-radius: 0.375rem;
+        font-weight: 500;
+        height: 2.25rem;
+        padding: 0 1rem;
+        cursor: pointer;
+        transition: all 150ms cubic-bezier(0.4, 0, 0.2, 1);
+        background-color: #f000;
+        color: var(--color-foreground);
+      }
+      .lock-btn:hover {
+        background-color: var(--color-accent, #2563eb) !important;
+        color: var(--color-accent-foreground), #ffffff) !important;
+        opacity: 1 !important;
+      }
+      .lock-btn:disabled {
+        opacity: 0.5 !important;
+        cursor: not-allowed;
+      }
+    `),
+
     h('div', null,
       h('h3', { style: { margin: '0 0 4px', fontSize: '15px', fontWeight: 600 } }, 'Your OpenPGP keys'),
       h('p', { style: { margin: '0 0 8px', fontSize: '13px', color: 'var(--color-muted-foreground, #64748b)' } },
@@ -256,7 +299,7 @@ export function SettingsSection() {
                 h('div', null,
                   h('div', { style: { fontWeight: 600, fontSize: '14px' } }, 
                     rec.email || rec.subject || 'OpenPGP User',
-                    rec.default && h('span', { style: { marginLeft: '8px', fontSize: '11px', padding: '2px 6px', borderRadius: '4px', background: 'var(--color-primary-smooth, #e0f2fe)', color: '#0369a1', fontWeight: 'normal' } }, 'Par défaut')
+                    rec.default && h('span', { style: { marginLeft: '8px', fontSize: '11px', padding: '2px 6px', borderRadius: '4px', background: 'var(--color-primary-smooth, #e0f2fe)', color: '#0369a1', fontWeight: 'normal' } }, 'Default')
                   ),
                   h('div', { style: { fontSize: '12px', color: 'var(--color-muted-foreground, #64748b)' } },
                     `${rec.algorithm} · created ${fmtDate(rec.notBefore)}${rec.notAfter ? ` · expires ${fmtDate(rec.notAfter)}` : ' · no expiration'}${isExpired(rec.notAfter) ? ' · EXPIRED' : ''}`),
@@ -268,27 +311,72 @@ export function SettingsSection() {
               ),
               h('div', { style: { display: 'flex', gap: '6px', alignItems: 'flex-start' } },
                 unlocked[rec.id]
-                  ? h('button', { type: 'button', style: btn, disabled: busy, onClick: () => lock(rec) }, 'Lock')
-                  : h('button', { type: 'button', style: btn, disabled: busy, onClick: () => initiateUnlock(rec) }, 'Unlock'),
+                  ? h('button', {
+                      type: 'button',
+                      style: { ...btn, color: 'var(--color-foreground)'},
+                      className: 'lock-btn',
+                      title: 'Lock this key',
+                      disabled: busy,
+                      onClick: () => lock(rec),
+                    },
+                      h('svg', {
+                        xmlns: 'http://www.w3.org/2000/svg',
+                        width: '1rem',
+                        height: '1rem',
+                        viewBox: '0 -960 960 960',
+                        fill: 'currentColor',
+                        'aria-hidden': 'true'
+                      },
+                        h('path', { d: 'M240-80q-33 0-56.5-23.5T160-160v-400q0-33 23.5-56.5T240-640h40v-80q0-83 58.5-141.5T480-920q83 0 141.5 58.5T680-720v80h40q33 0 56.5 23.5T800-560v400q0 33-23.5 56.5T720-80H240Zm0-80h480v-400H240v400Zm296.5-143.5Q560-327 560-360t-23.5-56.5Q513-440 480-440t-56.5 23.5Q400-393 400-360t23.5 56.5Q447-280 480-280t56.5-23.5ZM360-640h240v-80q0-50-35-85t-85-35q-50 0-85 35t-35 85v80ZM240-160v-400 400Z' })
+                      )
+                    )
+                  : h('button', {
+                      type: 'button',
+                      style: { ...btn, color: 'var(--color-foreground)' },
+                      className: 'lock-btn',
+                      title: 'Unlock this key',
+                      disabled: busy,
+                      onClick: () => initiateUnlock(rec),
+                    },
+                      h('svg', {
+                        xmlns: 'http://www.w3.org/2000/svg',
+                        width: '1rem',
+                        height: '1rem',
+                        viewBox: '0 -960 960 960',
+                        fill: 'currentColor',
+                        'aria-hidden': 'true'
+                      },
+                        h('path', { d: 'M240-160h480v-400H240v400Zm296.5-143.5Q560-327 560-360t-23.5-56.5Q513-440 480-440t-56.5 23.5Q400-393 400-360t23.5 56.5Q447-280 480-280t56.5-23.5ZM240-160v-400 400Zm0 80q-33 0-56.5-23.5T160-160v-400q0-33 23.5-56.5T240-640h280v-80q0-83 58.5-141.5T720-920q83 0 141.5 58.5T920-720h-80q0-50-35-85t-85-35q-50 0-85 35t-35 85v80h120q33 0 56.5 23.5T800-560v400q0 33-23.5 56.5T720-80H240Z' })
+                      )
+                    ),
                 h('button', {
                   type: 'button',
                   style: { ...btn, color: 'var(--color-destructive, #dc2626)', borderColor: 'var(--color-destructive, #dc2626)' },
-                  disabled: busy, onClick: () => removeKey(rec),
-                }, 'Delete'),
-              ),
-            ),
-            
-            unlockingKeyId === rec.id && h('div', { style: { display: 'flex', gap: '8px', alignItems: 'center', marginTop: '4px', borderTop: '1px dashed var(--color-border, #e2e8f0)', paddingTop: '8px' } },
-              h('input', {
-                type: 'password',
-                placeholder: 'Enter passphrase to unlock...',
-                value: unlockPassphrase,
-                disabled: busy,
-                onChange: (e) => setUnlockPassphrase(e.target.value),
-                style: { padding: '4px 8px', fontSize: '13px', borderRadius: '4px', border: '1px solid var(--color-border, #e2e8f0)', flex: 1, maxWidth: '240px' }
-              }),
-              h('button', { type: 'button', style: btn, disabled: busy, onClick: () => confirmUnlock(rec) }, 'OK'),
-              h('button', { type: 'button', style: btn, disabled: busy, onClick: () => setUnlockingKeyId(null) }, 'Cancel')
+                  className: 'trash-btn',
+                  title: 'Delete this key',
+                  disabled: busy, 
+                  onClick: () => removeKey(rec), 
+                }, 
+                  h('svg', { 
+                    xmlns: 'http://www.w3.org/2000/svg', 
+                    width: '1rem', 
+                    height: '1rem', 
+                    viewBox: '0 0 24 24', 
+                    fill: 'none', 
+                    stroke: 'currentColor', 
+                    strokeWidth: '2', 
+                    strokeLinecap: 'round', 
+                    strokeLinejoin: 'round',
+                    'aria-hidden': 'true'
+                  }, [
+                    h('path', { d: 'M10 11v6' }),
+                    h('path', { d: 'M14 11v6' }),
+                    h('path', { d: 'M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6' }),
+                    h('path', { d: 'M3 6h18' }),
+                    h('path', { d: 'M8 6V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2' })
+                  ])
+                )
+              )
             )
           )),
         ),
@@ -298,13 +386,13 @@ export function SettingsSection() {
           ref: fileRef, 
           type: 'file', 
           accept: '.asc,.key,.pgp', 
-          style: { display: 'none' }, // Hidden just like the public key input
+          style: { display: 'none' },
           onChange: handleFileChange 
         }),
         h('button', { 
           type: 'button', 
           className: 'composer-btn',
-          style: { width: '100%' }, // Uniform full-width
+          style: { width: '100%' },
           disabled: busy, 
           onClick: () => fileRef.current && fileRef.current.click() 
         }, [
@@ -324,20 +412,8 @@ export function SettingsSection() {
             h('path', { d: 'M5 12h14' }),
             h('path', { d: 'M12 5v14' })
           ]),
-          'Import private key'
-        ]),
-        
-        hasPrivateFile && h('div', { style: { display: 'flex', gap: '8px', alignItems: 'center', marginTop: '4px' } },
-          h('input', {
-            type: 'password',
-            placeholder: 'Enter OpenPGP key passphrase...',
-            value: passphrase,
-            disabled: busy,
-            onChange: (e) => setPassphrase(e.target.value),
-            style: { padding: '6px 10px', fontSize: '13px', borderRadius: '4px', border: '1px solid var(--color-border, #e2e8f0)', flex: 1, maxWidth: '320px' }
-          }),
-          h('button', { type: 'button', style: btn, disabled: busy, onClick: importKeyFile }, 'Submit Key')
-        )
+          'Add a private key'
+        ])
       ),
     ),
 
@@ -361,7 +437,33 @@ export function SettingsSection() {
               )
             ),
             c.source !== 'private-key' 
-              ? h('button', { type: 'button', style: { ...btn, color: 'var(--color-destructive, #dc2626)' }, disabled: busy, onClick: () => removeCert(c) }, 'Remove')
+              ? h('button', {
+                  type: 'button',
+                  style: { ...btn, color: 'var(--color-destructive, #dc2626)', borderColor: 'var(--color-destructive, #dc2626)' },
+                  className: 'trash-btn',
+                  title: 'Delete this key',
+                  disabled: busy, 
+                  onClick: () => removeCert(c), 
+                }, 
+                  h('svg', { 
+                    xmlns: 'http://www.w3.org/2000/svg', 
+                    width: '1rem', 
+                    height: '1rem', 
+                    viewBox: '0 0 24 24', 
+                    fill: 'none', 
+                    stroke: 'currentColor', 
+                    strokeWidth: '2', 
+                    strokeLinecap: 'round', 
+                    strokeLinejoin: 'round',
+                    'aria-hidden': 'true'
+                  }, [
+                    h('path', { d: 'M10 11v6' }),
+                    h('path', { d: 'M14 11v6' }),
+                    h('path', { d: 'M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6' }),
+                    h('path', { d: 'M3 6h18' }),
+                    h('path', { d: 'M8 6V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2' })
+                  ])
+                )
               : h('div', { style: { fontSize: '12px', color: 'var(--color-muted-foreground, #64748b)', fontStyle: 'italic', paddingRight: '8px' } }, 'Linked to private key')
           )),
         ),
