@@ -25,6 +25,7 @@ import {onComposeSend} from './hooks/onComposeSend.ts';
 import { initBackgroundSessionListener } from './pgp/session-broadcast.ts';
 import { onEmailListItemRender } from './hooks/onEmailListRender.ts';
 import { onSearchResults } from './hooks/onSearchresults.ts';
+import { onEmailsFetched } from './hooks/onEmailsFetched.ts';
 
 
 // ─── Privileged-tier capability probe ─────────────────────────────────
@@ -66,6 +67,7 @@ export const hooks = {
   onBeforeBlobUpload,
   onEmailListItemRender,
   onSearchResults,
+  onEmailsFetched,
  /*  async onAfterLogout() {
     if (settings().lockOnLogout === false) return;
     try { await clearSessionKeys(); } catch (err) { host.log.warn('clearSessionKeys failed', err); }
