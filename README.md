@@ -6,16 +6,15 @@ browser — no key material ever leaves the device.
 
 It use the MIME/S plugin as foundation.
 
-## What it does
+## Main Features
 
-| Capability | How |
-|---|---|
-| **Sign** outgoing mail | `onComposeSend` builds the MIME, wraps it in opaque CMS `SignedData`, and submits via `api.jmap.sendRaw`. |
-| **Encrypt** outgoing mail | `onComposeSend` builds CMS `EnvelopedData` to every recipient (AES-256-GCM by default; AES-128 optional) plus the sender, then submits raw. Sign + Encrypt does proper sign-then-encrypt. |
-| **Verify** incoming signatures | `onRenderEmailBody` fetches the CMS blob (`api.jmap.fetchBlob`), validates the signature cryptographically, checks validity dates, flags self-signed signers and signer≠From mismatches, and renders the inner body. |
-| **Decrypt** incoming mail | `onRenderEmailBody` decrypts `EnvelopedData` with your unlocked key (RSA-OAEP, with an RSAES-PKCS1-v1_5 + 3DES/RC2 legacy fallback for old Outlook/Thunderbird mail). |
-| **Key management** | `settings-section` slot: import keys, unlock/lock, delete, import recipient certificates. |
-| **Status** | `email-banner`/ slot shows signature / encryption state; `composer-toolbar` slot has per-message Sign / Encrypt toggles. |
+- **Core Cryptography** — Seamlessly encrypt, decrypt, sign, and verify emails locally using OpenPGP engine.
+- **Zero-Disk Session Security (100% RAM)** — Unlike traditional plugins that temporarily write unlocked secret keys to shared browser storage (like IndexedDB), **PGP True E2E** isolates unlocked keys strictly within an in-memory Web Worker. Your decrypted keys never touch the disk, not even for a millisecond, ensuring instant destruction upon tab closure or crash.
+- **True End-to-End Drafts & Attachments** — Standard PGP extensions only encrypt when you hit "Send", leaving your auto-saved drafts and attachments exposed to the server in cleartext while you write. This plugin intercepts the webmail's auto-save and upload cycles, encrypting drafts and attachments *locally in the browser* before they ever reach the network.
+- **Encrypted-at-Rest Local Search Index** —  **PGP True E2E** securely decrypts and indexes your emails into a local, encrypted-at-rest database. Search your secure history instantly without leaking a single keyword to the server or writing decrypted text to the disk.
+- **Automated Key Exchange** — Automatically detects and imports public keys attached to incoming signed emails, making recipient keyring management effortless.
+- **Keyserver Integration** — Seamlessly publish your public key to or fetch recipient keys from keys.openpgp.org directly within the interface.
+
 
 ## Security model
 
@@ -26,12 +25,7 @@ It use the MIME/S plugin as foundation.
 - **Keys at rest.** Private keys are imported from PKCS#12 and re-wrapped with
   AES-256-GCM under a PBKDF2(SHA-256, 600 000) key derived from a passphrase
   you choose. Stored in IndexedDB; the raw key bytes are never persisted.
-- **Keys in use.** Unlocking imports the key as a **non-extractable**
-  `CryptoKey`. Because the background (hooks) iframe and the visible slot
-  iframes are same-origin, the unlocked handle is shared through a session
-  IndexedDB store — it stays non-extractable and is **wiped on app boot and on
-  logout / account switch** (configurable), mirroring the former native
-  "in-memory, cleared on reload" behaviour.
+- **Keys in use.** Unlocking store the key in RAM. There are NEVER persisted to IndexedDB or disk.
 - Returned HTML still passes through the host sanitizer.
 
 ## Build
