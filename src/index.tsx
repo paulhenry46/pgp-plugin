@@ -26,6 +26,7 @@ import { initBackgroundSessionListener } from './pgp/session-broadcast.ts';
 import { onEmailListItemRender } from './hooks/onEmailListRender.ts';
 import { onSearchResults } from './hooks/onSearchresults.ts';
 import { onEmailsFetched } from './hooks/onEmailsFetched.ts';
+import { askForDefaultKeyPass } from './hooks/activate.ts';
 
 
 // ─── Privileged-tier capability probe ─────────────────────────────────
@@ -104,7 +105,7 @@ export async function activate(api :any) {
   initBackgroundSessionListener();
   
   api.log.info('OpenPGP plugin activated with memory-only session management.');
-  let keyCount = 0;
-  try { keyCount = (await listKeyRecords()).length; } catch (err) { api.log.warn('OpenPGP: listKeyRecords failed', err); }
-  api.log.info(`OpenPGP plugin activated (${keyCount} key${keyCount === 1 ? '' : 's'} available)`);
+  if(settings().askForDefaultKeyPassOnActivated){
+      await askForDefaultKeyPass(api);
+  }
 }

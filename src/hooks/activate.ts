@@ -1,0 +1,35 @@
+import { unlockPrivateKey } from "../pgp/import.ts";
+import { broadcastUnlockKey } from "../pgp/session-broadcast.ts";
+import { getDefaultKeyRecord } from "../storage.ts";
+
+export async function askForDefaultKeyPass(api: any): Promise<void> {
+  const defaultKey = await getDefaultKeyRecord();
+
+  if (defaultKey) {
+    const result = await api.ui.prompt({
+      title: "Unlock your default key",
+      message: "Unlock your default key to unlock all features of PGP plugin",
+      fields: [{ name: 'passphrase', label: 'passphrase', type: 'password', required: true }]
+    });
+
+    if (!result || !result.passphrase) {
+      return; 
+    }
+
+    const unlockPassphrase = result.passphrase;
+
+    try {
+      const { unlockedPrivateKey, signingKey, decryptionKey, aesKey } = await unlockPrivateKey(defaultKey, unlockPassphrase);     
+      
+      broadcastUnlockKey({ 
+        id: defaultKey.id, 
+        unlockedPrivateKey, 
+        signingKey, 
+        decryptionKey,
+        aesKey: aesKey,
+      });
+    } catch (error) {
+      console.error("Can't unlock key :", error);
+    }
+  }
+}

@@ -39,6 +39,12 @@
       "description": "Encrypt drafts and attachments before saving them to the server. This is useful if you want to keep your drafts private, but it may cause issues if you activated the 'Encrypt on append' option in your stalwart account",
       "default": true
     },
+    "askForDefaultKeyPassOnActivated": {
+      "type": "boolean",
+      "label": "Ask for the passphrase when booting the app.",
+      "description": "Ask for the passphrase decrypting your default key when booting the app. Avoid to go to settings to manually unlock your key.",
+      "default": true
+    },
     "lockOnLogout": {
       "type": "boolean",
       "label": "Lock keys on logout",

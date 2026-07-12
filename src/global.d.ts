@@ -25,6 +25,13 @@ declare module '@plugin-host' {
   };
   export const ui: {
     confirm(options: { title: string; message: string; danger?: boolean; confirmLabel?: string }): Promise<boolean>;
+    prompt(opts: {
+        title?: string;
+        message?: string;
+        confirmLabel?: string;
+        cancelLabel?: string;
+        fields?: Array<{ name: string; label: string; type?: 'text' | 'password'; placeholder?: string; required?: boolean }>;
+      }): Promise<Record<string, string> | null>;
   };
   export const plugin: {
     settings?: {
@@ -33,6 +40,7 @@ declare module '@plugin-host' {
       defaultEncrypt?: boolean;
       lockOnLogout?: boolean;
       encryptDrafts?: boolean;
+      askForDefaultKeyPassOnActivated?: boolean;
     };
   } | undefined;
 }

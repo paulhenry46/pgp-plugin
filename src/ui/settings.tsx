@@ -169,6 +169,13 @@ export function SettingsSection() {
   }
 
   async function removeCert(c: PublicCert) {
+    const ok = await host.ui.confirm({
+      title: 'Delete Public Key',
+      message: `Delete the public key for ${c.email}?`,
+      danger: true,
+      confirmLabel: 'Delete',
+    });
+    if (!ok) return;
     await deletePublicCert(c.id);
     await refresh();
   }
@@ -201,6 +208,33 @@ export function SettingsSection() {
   }
 
   return h('div', { style: { display: 'flex', flexDirection: 'column', gap: '16px', maxWidth: '720px' } },
+    // Injection des styles CSS globaux
+    h('style', null, `
+      .composer-btn {
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        border-radius: 0.375rem;
+        font-weight: 500;
+        height: 2.25rem;
+        padding: 0 1rem;
+        cursor: pointer;
+        transition: all 150ms cubic-bezier(0.4, 0, 0.2, 1);
+        border: 1px solid var(--color-border, #e2e8f0);
+        background-color: var(--color-background, #ffffff);
+        color: var(--color-foreground, #0f172a);
+      }
+      .composer-btn:hover {
+        background-color: var(--color-accent, #2563eb) !important;
+        color: var(--color-accent-foreground, #ffffff) !important;
+        opacity: 1 !important;
+      }
+      .composer-btn:disabled {
+        opacity: 0.5 !important;
+        cursor: not-allowed;
+      }
+    `),
+
     h('div', null,
       h('h3', { style: { margin: '0 0 4px', fontSize: '15px', fontWeight: 600 } }, 'Your OpenPGP keys'),
       h('p', { style: { margin: '0 0 8px', fontSize: '13px', color: 'var(--color-muted-foreground, #64748b)' } },
@@ -286,10 +320,7 @@ export function SettingsSection() {
       h('h3', { style: { margin: '0 0 4px', fontSize: '15px', fontWeight: 600 } }, 'Recipient public keys'),
       h('p', { style: { margin: '0 0 8px', fontSize: '13px', color: 'var(--color-muted-foreground, #64748b)' } },
         'Public keys (ASCII Armored) of contacts you send encrypted mail to.'),
-      h('div', { style: { display: 'flex', gap: '8px', alignItems: 'center', marginBottom: '12px' } },
-        h('input', { ref: certFileRef, type: 'file', accept: '.asc,.key,.pub', style: { fontSize: '13px' } }),
-        h('button', { type: 'button', style: btn, disabled: busy, onClick: importCertFile }, 'Import public key'),
-      ),
+
       certs.length === 0
         ? h('div', { style: { ...card, fontSize: '13px', color: 'var(--color-muted-foreground, #64748b)' } }, 'No recipient public keys collected.')
         : h('div', { style: { display: 'flex', flexDirection: 'column', gap: '6px' } },
@@ -309,6 +340,40 @@ export function SettingsSection() {
               : h('div', { style: { fontSize: '12px', color: 'var(--color-muted-foreground, #64748b)', fontStyle: 'italic', paddingRight: '8px' } }, 'Linked to private key')
           )),
         ),
+        h('div', { style: { marginTop: '12px' } },
+        h('input', { 
+          ref: certFileRef, 
+          type: 'file', 
+          accept: '.asc,.key,.pub', 
+          style: { display: 'none' },
+          onChange: importCertFile
+        }),
+        h('button', { 
+          type: 'button', 
+          className: 'composer-btn',
+          style: { width: '100%' },
+          disabled: busy, 
+          onClick: () => certFileRef.current && certFileRef.current.click() 
+        }, [
+          h('svg', { 
+            xmlns: 'http://www.w3.org/2000/svg', 
+            width: '1rem', 
+            height: '1rem', 
+            viewBox: '0 0 24 24', 
+            fill: 'none', 
+            stroke: 'currentColor', 
+            strokeWidth: '2', 
+            strokeLinecap: 'round', 
+            strokeLinejoin: 'round', 
+            style: { marginRight: '0.5rem' },
+            'aria-hidden': 'true' 
+          }, [
+            h('path', { d: 'M5 12h14' }),
+            h('path', { d: 'M12 5v14' })
+          ]),
+          'Add a public key'
+        ])
+      ),
     ),
   );
 }

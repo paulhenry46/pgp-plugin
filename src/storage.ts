@@ -143,6 +143,13 @@ export async function listKeyRecords(accountId?: string): Promise<KeyRecord[]> {
   return all.filter((r) => r.accountId === accountId || !r.accountId);
 }
 
+export async function getDefaultKeyRecord(): Promise<KeyRecord |undefined>{
+  const db = await openDB();
+  const all = await txPromise<KeyRecord[]>(db, KEY_RECORDS_STORE, 'readonly', (s) => s.getAll());
+
+  return all.find((r) => r.default === true);
+}
+
 export async function deleteKeyRecord(id: string): Promise<void> {
   const db = await openDB();
   await txPromise<undefined>(db, KEY_RECORDS_STORE, 'readwrite', (s) => s.delete(id));
