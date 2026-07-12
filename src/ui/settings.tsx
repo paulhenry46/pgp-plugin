@@ -240,31 +240,9 @@ export function SettingsSection() {
       h('p', { style: { margin: '0 0 8px', fontSize: '13px', color: 'var(--color-muted-foreground, #64748b)' } },
         'Import an armored OpenPGP private key (.asc/.key). The key remains encrypted locally in your browser sandbox.'),
       
-      h('div', { style: { display: 'flex', flexDirection: 'column', gap: '8px', marginBottom: '12px' } },
-        h('div', { style: { display: 'flex', gap: '8px', alignItems: 'center' } },
-          h('input', { 
-            ref: fileRef, 
-            type: 'file', 
-            accept: '.asc,.key,.pgp', 
-            style: { fontSize: '13px' },
-            onChange: handleFileChange 
-          }),
-          h('button', { type: 'button', style: btn, disabled: busy, onClick: importKeyFile }, 'Import private key')
-        ),
-        
-        hasPrivateFile && h('input', {
-          type: 'password',
-          placeholder: 'Enter OpenPGP key passphrase...',
-          value: passphrase,
-          disabled: busy,
-          onChange: (e) => setPassphrase(e.target.value),
-          style: { padding: '6px 10px', fontSize: '13px', borderRadius: '4px', border: '1px solid var(--color-border, #e2e8f0)', maxWidth: '320px', marginTop: '4px' }
-        })
-      ),
-
       keys.length === 0
-        ? h('div', { style: { ...card, fontSize: '13px', color: 'var(--color-muted-foreground, #64748b)' } }, 'No keys imported yet.')
-        : h('div', { style: { display: 'flex', flexDirection: 'column', gap: '8px' } },
+        ? h('div', { style: { ...card, fontSize: '13px', color: 'var(--color-muted-foreground, #64748b)', marginBottom: '12px' } }, 'No keys imported yet.')
+        : h('div', { style: { display: 'flex', flexDirection: 'column', gap: '8px', marginBottom: '12px' } },
           keys.map((rec) => h('div', { key: rec.id, style: { ...card, display: 'flex', flexDirection: 'column', gap: '10px' } },
             h('div', { style: { display: 'flex', justifyContent: 'space-between', gap: '8px', flexWrap: 'wrap' } },
               h('div', { style: { display: 'flex', alignItems: 'flex-start', gap: '12px' } },
@@ -314,6 +292,53 @@ export function SettingsSection() {
             )
           )),
         ),
+
+      h('div', { style: { display: 'flex', flexDirection: 'column', gap: '8px', marginTop: '12px' } },
+        h('input', { 
+          ref: fileRef, 
+          type: 'file', 
+          accept: '.asc,.key,.pgp', 
+          style: { display: 'none' }, // Hidden just like the public key input
+          onChange: handleFileChange 
+        }),
+        h('button', { 
+          type: 'button', 
+          className: 'composer-btn',
+          style: { width: '100%' }, // Uniform full-width
+          disabled: busy, 
+          onClick: () => fileRef.current && fileRef.current.click() 
+        }, [
+          h('svg', { 
+            xmlns: 'http://www.w3.org/2000/svg', 
+            width: '1rem', 
+            height: '1rem', 
+            viewBox: '0 0 24 24', 
+            fill: 'none', 
+            stroke: 'currentColor', 
+            strokeWidth: '2', 
+            strokeLinecap: 'round', 
+            strokeLinejoin: 'round', 
+            style: { marginRight: '0.5rem' },
+            'aria-hidden': 'true' 
+          }, [
+            h('path', { d: 'M5 12h14' }),
+            h('path', { d: 'M12 5v14' })
+          ]),
+          'Import private key'
+        ]),
+        
+        hasPrivateFile && h('div', { style: { display: 'flex', gap: '8px', alignItems: 'center', marginTop: '4px' } },
+          h('input', {
+            type: 'password',
+            placeholder: 'Enter OpenPGP key passphrase...',
+            value: passphrase,
+            disabled: busy,
+            onChange: (e) => setPassphrase(e.target.value),
+            style: { padding: '6px 10px', fontSize: '13px', borderRadius: '4px', border: '1px solid var(--color-border, #e2e8f0)', flex: 1, maxWidth: '320px' }
+          }),
+          h('button', { type: 'button', style: btn, disabled: busy, onClick: importKeyFile }, 'Submit Key')
+        )
+      ),
     ),
 
     h('div', null,
@@ -322,8 +347,8 @@ export function SettingsSection() {
         'Public keys (ASCII Armored) of contacts you send encrypted mail to.'),
 
       certs.length === 0
-        ? h('div', { style: { ...card, fontSize: '13px', color: 'var(--color-muted-foreground, #64748b)' } }, 'No recipient public keys collected.')
-        : h('div', { style: { display: 'flex', flexDirection: 'column', gap: '6px' } },
+        ? h('div', { style: { ...card, fontSize: '13px', color: 'var(--color-muted-foreground, #64748b)', marginBottom: '12px' } }, 'No recipient public keys collected.')
+        : h('div', { style: { display: 'flex', flexDirection: 'column', gap: '6px', marginBottom: '12px' } },
           certs.map((c) => h('div', { key: c.id, style: { ...card, display: 'flex', justifyContent: 'space-between', gap: '8px', alignItems: 'center' } },
             h('div', { style: { display: 'flex', alignItems: 'center', gap: '12px' } },
               h('div', null,
@@ -340,7 +365,8 @@ export function SettingsSection() {
               : h('div', { style: { fontSize: '12px', color: 'var(--color-muted-foreground, #64748b)', fontStyle: 'italic', paddingRight: '8px' } }, 'Linked to private key')
           )),
         ),
-        h('div', { style: { marginTop: '12px' } },
+        
+      h('div', null,
         h('input', { 
           ref: certFileRef, 
           type: 'file', 
