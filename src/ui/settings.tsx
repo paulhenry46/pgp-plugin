@@ -61,11 +61,21 @@ export function SettingsSection() {
 
     // Use host.ui.prompt to gather both the active key passphrase and an optional new storage passphrase
     const result = await host.ui.prompt({
-      title: "Import Private Key",
-      message: "Provide the current passphrase to decrypt your OpenPGP file, and optionally set a new one for local storage optimization.",
+      title: host.i18n.t('prompt.import_private_key.title'),
+      message: host.i18n.t('prompt.import_private_key.message'),
       fields: [
-        { name: 'currentPassphrase', label: 'Current Passphrase', type: 'password', required: true },
-        { name: 'storagePassphrase', label: 'New Storage Passphrase (Optional)', type: 'password', required: false }
+        { 
+          name: 'currentPassphrase', 
+          label: host.i18n.t('prompt.import_private_key.current_passphrase_label'), 
+          type: 'password', 
+          required: true 
+        },
+        { 
+          name: 'storagePassphrase', 
+          label: host.i18n.t('prompt.import_private_key.storage_passphrase_label'), 
+          type: 'password', 
+          required: false 
+        }
       ]
     });
 
@@ -95,10 +105,17 @@ export function SettingsSection() {
   }
 
   async function initiateUnlock(rec: KeyRecord) {
+    const identity = rec.email || host.i18n.t('prompt.unlock_key.fallback_identity');
+
     const result = await host.ui.prompt({
-      title: "Unlock your key",
-      message: `Unlock your key (${rec.email || 'this identity'}) to unlock all features of the PGP plugin`,
-      fields: [{ name: 'passphrase', label: 'Passphrase', type: 'password', required: true }]
+      title: host.i18n.t('prompt.unlock_key.title'),
+      message: `${host.i18n.t('prompt.unlock_key.message_prefix')}${identity}${host.i18n.t('prompt.unlock_key.message_suffix')}`,
+      fields: [{ 
+        name: 'passphrase', 
+        label: host.i18n.t('prompt.unlock_key.passphrase_label'), 
+        type: 'password', 
+        required: true 
+      }]
     });
 
     if (!result || !result.passphrase) return;
@@ -269,7 +286,7 @@ export function SettingsSection() {
       }
       .lock-btn:hover {
         background-color: var(--color-accent, #2563eb) !important;
-        color: var(--color-accent-foreground), #ffffff) !important;
+        color: var(--color-accent-foreground, #ffffff) !important;
         opacity: 1 !important;
       }
       .lock-btn:disabled {
@@ -279,12 +296,12 @@ export function SettingsSection() {
     `),
 
     h('div', null,
-      h('h3', { style: { margin: '0 0 4px', fontSize: '15px', fontWeight: 600 } }, 'Your OpenPGP keys'),
+      h('h3', { style: { margin: '0 0 4px', fontSize: '15px', fontWeight: 600 } }, host.i18n.t('settings.private_keys_title')),
       h('p', { style: { margin: '0 0 8px', fontSize: '13px', color: 'var(--color-muted-foreground, #64748b)' } },
-        'Import an armored OpenPGP private key (.asc/.key). The key remains encrypted locally in your browser sandbox.'),
+        host.i18n.t('settings.private_keys_desc')),
       
       keys.length === 0
-        ? h('div', { style: { ...card, fontSize: '13px', color: 'var(--color-muted-foreground, #64748b)', marginBottom: '12px' } }, 'No keys imported yet.')
+        ? h('div', { style: { ...card, fontSize: '13px', color: 'var(--color-muted-foreground, #64748b)', marginBottom: '12px' } }, host.i18n.t('settings.no_private_keys'))
         : h('div', { style: { display: 'flex', flexDirection: 'column', gap: '8px', marginBottom: '12px' } },
           keys.map((rec) => h('div', { key: rec.id, style: { ...card, display: 'flex', flexDirection: 'column', gap: '10px' } },
             h('div', { style: { display: 'flex', justifyContent: 'space-between', gap: '8px', flexWrap: 'wrap' } },
@@ -299,14 +316,14 @@ export function SettingsSection() {
                 h('div', null,
                   h('div', { style: { fontWeight: 600, fontSize: '14px' } }, 
                     rec.email || rec.subject || 'OpenPGP User',
-                    rec.default && h('span', { style: { marginLeft: '8px', fontSize: '11px', padding: '2px 6px', borderRadius: '4px', background: 'var(--color-primary-smooth, #e0f2fe)', color: '#0369a1', fontWeight: 'normal' } }, 'Default')
+                    rec.default && h('span', { style: { marginLeft: '8px', fontSize: '11px', padding: '2px 6px', borderRadius: '4px', background: 'var(--color-primary-smooth, #e0f2fe)', color: '#0369a1', fontWeight: 'normal' } }, host.i18n.t('settings.default_badge'))
                   ),
                   h('div', { style: { fontSize: '12px', color: 'var(--color-muted-foreground, #64748b)' } },
-                    `${rec.algorithm} · created ${fmtDate(rec.notBefore)}${rec.notAfter ? ` · expires ${fmtDate(rec.notAfter)}` : ' · no expiration'}${isExpired(rec.notAfter) ? ' · EXPIRED' : ''}`),
+                    `${rec.algorithm} · ${host.i18n.t('settings.key_created')} ${fmtDate(rec.notBefore)}${rec.notAfter ? ` · ${host.i18n.t('settings.key_expires')} ${fmtDate(rec.notAfter)}` : ` · ${host.i18n.t('settings.key_no_expiration')}`}${isExpired(rec.notAfter) ? ` · ${host.i18n.t('settings.key_expired')}` : ''}`),
                   h('div', { style: { fontSize: '11px', fontFamily: 'monospace', color: 'var(--color-muted-foreground, #64748b)', wordBreak: 'break-all' } },
                     rec.fingerprint),
                   h('div', { style: { fontSize: '11px', color: 'var(--color-muted-foreground, #64748b)' } },
-                    `${rec.capabilities && rec.capabilities.canSign ? 'sign' : ''}${rec.capabilities && rec.capabilities.canSign && rec.capabilities.canEncrypt ? ' · ' : ''}${rec.capabilities && rec.capabilities.canEncrypt ? 'encrypt' : ''}`),
+                    `${rec.capabilities && rec.capabilities.canSign ? host.i18n.t('settings.key_sign') : ''}${rec.capabilities && rec.capabilities.canSign && rec.capabilities.canEncrypt ? ' · ' : ''}${rec.capabilities && rec.capabilities.canEncrypt ? host.i18n.t('settings.key_encrypt') : ''}`),
                 ),
               ),
               h('div', { style: { display: 'flex', gap: '6px', alignItems: 'flex-start' } },
@@ -315,7 +332,7 @@ export function SettingsSection() {
                       type: 'button',
                       style: { ...btn, color: 'var(--color-foreground)'},
                       className: 'lock-btn',
-                      title: 'Lock this key',
+                      title: host.i18n.t('settings.action.lock'),
                       disabled: busy,
                       onClick: () => lock(rec),
                     },
@@ -334,7 +351,7 @@ export function SettingsSection() {
                       type: 'button',
                       style: { ...btn, color: 'var(--color-foreground)' },
                       className: 'lock-btn',
-                      title: 'Unlock this key',
+                      title: host.i18n.t('settings.action.unlock'),
                       disabled: busy,
                       onClick: () => initiateUnlock(rec),
                     },
@@ -353,7 +370,7 @@ export function SettingsSection() {
                   type: 'button',
                   style: { ...btn, color: 'var(--color-destructive, #dc2626)', borderColor: 'var(--color-destructive, #dc2626)' },
                   className: 'trash-btn',
-                  title: 'Delete this key',
+                  title: host.i18n.t('settings.action.delete'),
                   disabled: busy, 
                   onClick: () => removeKey(rec), 
                 }, 
@@ -412,28 +429,28 @@ export function SettingsSection() {
             h('path', { d: 'M5 12h14' }),
             h('path', { d: 'M12 5v14' })
           ]),
-          'Add a private key'
+          host.i18n.t('settings.add_private_key')
         ])
       ),
     ),
 
     h('div', null,
-      h('h3', { style: { margin: '0 0 4px', fontSize: '15px', fontWeight: 600 } }, 'Recipient public keys'),
+      h('h3', { style: { margin: '0 0 4px', fontSize: '15px', fontWeight: 600 } }, host.i18n.t('settings.public_keys_title')),
       h('p', { style: { margin: '0 0 8px', fontSize: '13px', color: 'var(--color-muted-foreground, #64748b)' } },
-        'Public keys (ASCII Armored) of contacts you send encrypted mail to.'),
+        host.i18n.t('settings.public_keys_desc')),
 
       certs.length === 0
-        ? h('div', { style: { ...card, fontSize: '13px', color: 'var(--color-muted-foreground, #64748b)', marginBottom: '12px' } }, 'No recipient public keys collected.')
+        ? h('div', { style: { ...card, fontSize: '13px', color: 'var(--color-muted-foreground, #64748b)', marginBottom: '12px' } }, host.i18n.t('settings.no_public_keys'))
         : h('div', { style: { display: 'flex', flexDirection: 'column', gap: '6px', marginBottom: '12px' } },
           certs.map((c) => h('div', { key: c.id, style: { ...card, display: 'flex', justifyContent: 'space-between', gap: '8px', alignItems: 'center' } },
             h('div', { style: { display: 'flex', alignItems: 'center', gap: '12px' } },
               h('div', null,
                 h('div', { style: { fontWeight: 600, fontSize: '13px' } }, 
                   c.email || c.subject,
-                  c.source === 'private-key' && h('span', { style: { marginLeft: '8px', fontSize: '11px', padding: '2px 6px', borderRadius: '4px', background: '#f1f5f9', color: '#475569', fontWeight: 'normal' } }, 'Own key')
+                  c.source === 'private-key' && h('span', { style: { marginLeft: '8px', fontSize: '11px', padding: '2px 6px', borderRadius: '4px', background: '#f1f5f9', color: '#475569', fontWeight: 'normal' } }, host.i18n.t('settings.own_key_badge'))
                 ),
                 h('div', { style: { fontSize: '11px', color: 'var(--color-muted-foreground, #64748b)' } },
-                  `${c.source === 'private-key' ? 'Linked' : c.source} · expires ${fmtDate(c.notAfter)}${isExpired(c.notAfter) ? ' · EXPIRED' : ''}`),
+                  `${c.source === 'private-key' ? host.i18n.t('settings.linked_key') : c.source} · ${host.i18n.t('settings.key_expires')} ${fmtDate(c.notAfter)}${isExpired(c.notAfter) ? ` · ${host.i18n.t('settings.key_expired')}` : ''}`),
               )
             ),
             c.source !== 'private-key' 
@@ -441,7 +458,7 @@ export function SettingsSection() {
                   type: 'button',
                   style: { ...btn, color: 'var(--color-destructive, #dc2626)', borderColor: 'var(--color-destructive, #dc2626)' },
                   className: 'trash-btn',
-                  title: 'Delete this key',
+                  title: host.i18n.t('settings.action.delete'),
                   disabled: busy, 
                   onClick: () => removeCert(c), 
                 }, 
@@ -464,7 +481,7 @@ export function SettingsSection() {
                     h('path', { d: 'M8 6V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2' })
                   ])
                 )
-              : h('div', { style: { fontSize: '12px', color: 'var(--color-muted-foreground, #64748b)', fontStyle: 'italic', paddingRight: '8px' } }, 'Linked to private key')
+              : h('div', { style: { fontSize: '12px', color: 'var(--color-muted-foreground, #64748b)', fontStyle: 'italic', paddingRight: '8px' } }, host.i18n.t('settings.linked_to_private'))
           )),
         ),
         
@@ -499,7 +516,7 @@ export function SettingsSection() {
             h('path', { d: 'M5 12h14' }),
             h('path', { d: 'M12 5v14' })
           ]),
-          'Add a public key'
+          host.i18n.t('settings.add_public_key')
         ])
       ),
     ),

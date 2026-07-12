@@ -14,8 +14,9 @@ import {settings} from '../shared.ts';
   // Get the pub key
   const key = await getDefaultPublicKeyForEncryption();
   if (!key) {
-    host.toast.error('No default public key found for attachment encryption. Please set a default public key in OpenPGP settings.');  
-    return}
+    host.toast.error(host.i18n.t('error.no_default_public_key_attachment'));  
+    return;
+  }
   const fileBytes = await file.bytes();
   const encryptedBlob: Blob = await pgpEncrypt(
       fileBytes, 

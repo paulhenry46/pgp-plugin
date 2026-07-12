@@ -7,12 +7,13 @@ import { detectPgp } from '../pgp/detect.ts';
 import { parseMime } from '../mime/parse.ts';
 import { extractKeyInfo, scanAndImportKeysFromAttachments } from '../pgp/key-utils.ts';
 
-import {emailsOf, blobToBytes, bytesArrayBuffer, addrList} from '../util.ts';
-import {PREFS_KEY, INTENT_KEY, VERIFY_PREFIX, settings, STATE_PREFIX} from '../shared.ts';
+import { addrList} from '../util.ts';
+import { VERIFY_PREFIX, STATE_PREFIX} from '../shared.ts';
 import { listPublicCerts } from '../storage.ts';
 import {unlockedDecryptMaps} from '../util.ts';
 import { isCapable } from '../index.tsx';
 import { indexAndPersistDecryptedMail } from '../cache.ts';
+
 /**
  * Main entry point for rendering PGP-processed email bodies.
  */
@@ -29,7 +30,7 @@ export async function onRenderEmailBody(body: any, ctx: any) {
     const status = {
       isSigned: ['pgp-signature-file', 'pgp-mime-signed'].includes(detection.type),
       isEncrypted: false,
-      unsupportedReason: `Unsupported OpenPGP layout (${detection.type})`,
+      unsupportedReason: `${host.i18n.t('error.unsupported_layout_prefix')}${detection.type}${host.i18n.t('error.unsupported_layout_suffix')}`,
     };
     await persistVerifyStatus(ctx.id, status);
     return undefined;
@@ -46,12 +47,11 @@ export async function onRenderEmailBody(body: any, ctx: any) {
     const isEncryptedCase = ['pgp-mime-encrypted', 'pgp-inline-encrypted', 'pgp-encrypted-file'].includes(detection.type);
     const isSignedCase = ['pgp-mime-signed', 'pgp-inline-signed', 'pgp-signature-file'].includes(detection.type);
 
-    // Contextually shared keys
     const knownPublicKeys = await loadPublicKeys(fromEmail);
 
     // ── Case 1 : Encrypted (And potentially signed) ──
     if (isEncryptedCase) {
-        await persistEmailListState(ctx.id, { isEncrypted: true, decryptionSuccess: null, processing: true });
+      await persistEmailListState(ctx.id, { isEncrypted: true, decryptionSuccess: null, processing: true });
       const { keyRecords, unlockedKeys } = await unlockedDecryptMaps();
 
       if (detection.type === 'pgp-inline-encrypted') {
@@ -196,11 +196,11 @@ async function handleInlineEncrypted(
         }
         textBody = textBody.replace(metadataRegex, '').trim();
       } catch (e) {
-        console.error('Erreur lors du parsing des métadonnées PGP :', e);
+        console.error(host.i18n.t('error.metadata_parse_failed'), e);
       }
     }else if(ctx.attachments && ctx.attachments.length > 0){
       const acc = [];
-      console.warn('No metadata found for attachments, but attachments exist. They may not be restored correctly.');
+      console.warn(host.i18n.t('warn.metadata_missing_attachments'));
       for(const att of ctx.attachments){
             
               const decryptedData = (await pgpDecrypt({
@@ -237,7 +237,6 @@ async function handleInlineEncrypted(
   const verif = { isEncrypted: true, decryptionSuccess: true, isSigned: false }
   await persistVerifyStatus(ctx.id, verif);
 
-  //TODO decode and transform to dataURL
   console.log(attachments);
   await indexAndPersistDecryptedMail(ctx.id, textBody)
   return {
@@ -280,7 +279,7 @@ async function handleMimeEncrypted(
 
     await persistVerifyStatus(ctx.id, status);
 
-    const fallbackErrorMessage = `Could not decrypt this PGP message: ${status.decryptionError}`;
+    const fallbackErrorMessage = `${host.i18n.t('error.decrypt_failed_prefix')}${status.decryptionError}`;
     return {
       ...body,
       handledBy: 'openpgp',
@@ -322,7 +321,7 @@ async function handleMimeEncrypted(
         verification.signerEmailMatch = fromEmail.toLowerCase().trim() === verification.signerCert.email;
       } else {
         verification.signatureValid = false;
-        verification.signatureError = `Unknown public key or missing from the keyring (Key ID: ${signerKeyID}).`;
+        verification.signatureError = `${host.i18n.t('error.unknown_public_key_prefix')}${signerKeyID}${host.i18n.t('error.unknown_public_key_suffix')}`;
       }
     } catch (sigErr) {
       verification.signatureValid = false;

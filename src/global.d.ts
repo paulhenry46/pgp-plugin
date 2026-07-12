@@ -1,5 +1,6 @@
 
 declare module '@plugin-host' {
+  export const i18n : any;
   export const storage: {
     get(key: string): Promise<any>;
     set(key: string, value: any): Promise<void>;

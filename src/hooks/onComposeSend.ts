@@ -6,9 +6,7 @@ import { buildMimeMessage, wrapAsPgpMimeEncrypted, wrapAsPgpMimeSigned } from '.
 import { pgpSignDetached } from '../pgp/pgp-sign.ts';
 import { pgpEncrypt } from '../pgp/encrypt.ts';
 import { clearArmoredPrivateKeyToPrivateKey, recipientKeysFor, signingKeyRecordForEmail } from '../util.ts';
-import {
-  getSessionKeys, KeyRecord,
-} from '../storage.ts';
+import { KeyRecord } from '../storage.ts';
 
 import {emailsOf, blobToBytes, bytesArrayBuffer} from '../util.ts';
 import { INTENT_KEY, settings} from '../shared.ts';
@@ -74,7 +72,7 @@ async function fetchAttachments(req: ComposeRequest) {
       });
     } catch (err) {
       host.log.warn('attachment fetch failed', att.name, err);
-      throw new Error(`Could not read attachment "${att.name || ''}" for encryption`);
+      throw new Error(`${host.i18n.t('error.attachment_read_failed_prefix')}${att.name || ''}${host.i18n.t('error.attachment_read_failed_suffix')}`);
     }
   }
   return out;
@@ -89,18 +87,18 @@ export async function onComposeSend(req: ComposeRequest): Promise<boolean | unde
   if (!sign && !encrypt) return undefined;
   console.log('on continue');
   if (!(await isCapable())) {
-    host.toast.error('Cannot sign/encrypt: OpenPGP is not running in the privileged tier.');
+    host.toast.error(host.i18n.t('error.not_privileged_tier'));
     return false;
   }
 
   try {
     const identityId = req.identityId || req.identity || '';
 
-  if (!identityId) throw new Error('No sending identity available');
+    if (!identityId) throw new Error(host.i18n.t('error.no_identity'));
 
     const from = {addr: req.fromEmail, name: req.fromName};
 
-    if (!from.addr) throw new Error('Could not determine sender address');
+    if (!from.addr) throw new Error(host.i18n.t('error.no_sender_address'));
     const allRecipientEmails = [...emailsOf(req.to), ...emailsOf(req.cc), ...emailsOf(req.bcc)];
 
     console.log('from:' ,req.fromEmail, from.addr);
@@ -110,7 +108,7 @@ export async function onComposeSend(req: ComposeRequest): Promise<boolean | unde
     }
 
     if ((sign || encrypt) && !keyRecord) {
-      host.toast.error(`No OpenPGP key for ${from.addr}. Import one in Settings → Plugins → OpenPGP.`);
+      host.toast.error(`${host.i18n.t('error.no_key_for_email_prefix')}${from.addr}${host.i18n.t('error.no_key_for_email_suffix')}`);
       return false;
     }
 
@@ -141,7 +139,7 @@ export async function onComposeSend(req: ComposeRequest): Promise<boolean | unde
       const { found, missing } = await recipientKeysFor(allRecipientEmails);
       console.log('RecipientKey :', found);
       if (missing.length > 0) {
-        host.toast.error(`Missing encryption key for: ${missing.join(', ')}`);
+        host.toast.error(`${host.i18n.t('error.missing_encryption_key_prefix')}${missing.join(', ')}`);
         return false;
       }
 
@@ -150,7 +148,7 @@ export async function onComposeSend(req: ComposeRequest): Promise<boolean | unde
       if (sign) {
         console.log('preparing native signing key for combined encryption');
         if (!session || !session.signingKey) {
-          host.toast.error('Your OpenPGP key is locked. Unlock it in Settings, then resend.');
+          host.toast.error(host.i18n.t('error.key_locked'));
           return false;
         }
         signingKeyForEncrypt = await clearArmoredPrivateKeyToPrivateKey(session.signingKey);
@@ -173,13 +171,13 @@ export async function onComposeSend(req: ComposeRequest): Promise<boolean | unde
       console.log('sign Message')
       // Case: Signature only (detached multipart/signed)
       if (!session || !session.signingKey) {
-        host.toast.error('Your OpenPGP key is locked. Unlock it in Settings, then resend.');
+        host.toast.error(host.i18n.t('error.key_locked'));
         return false;
       }
       const signatureBlob = await pgpSignDetached(clearMimeBytes, await clearArmoredPrivateKeyToPrivateKey(session.signingKey));
       
-    // Convert clearMimeBytes to a blob
-    const clearMimeBytesBlob = new Blob([clearMimeBytes.slice().buffer], { type: 'application/octet-stream' });
+      // Convert clearMimeBytes to a blob
+      const clearMimeBytesBlob = new Blob([clearMimeBytes.slice().buffer], { type: 'application/octet-stream' });
 
       finalEnvelopeBlob = wrapAsPgpMimeSigned(clearMimeBytesBlob, signatureBlob, {
         from, to: req.to, cc: req.cc, subject: req.subject || '', inReplyTo: req.inReplyTo, references: req.references, messageId: req.messageId
@@ -187,7 +185,7 @@ export async function onComposeSend(req: ComposeRequest): Promise<boolean | unde
     }
 
     if (!finalEnvelopeBlob) {
-      throw new Error('Cryptographic processing failed to generate an output envelope.');
+      throw new Error(host.i18n.t('error.cryptographic_failed'));
     }
     console.log('finalEnvelopeBlob', finalEnvelopeBlob);
 
@@ -201,16 +199,17 @@ export async function onComposeSend(req: ComposeRequest): Promise<boolean | unde
     console.log(result);
 
     host.toast.success(
-      encrypt && sign ? 'Message signed, encrypted and sent (PGP/MIME)'
-        : encrypt ? 'Message encrypted and sent (PGP/MIME)'
-          : 'Message signed and sent (PGP/MIME)',
+      encrypt && sign ? host.i18n.t('success.sent_signed_encrypted')
+        : encrypt ? host.i18n.t('success.sent_encrypted')
+          : host.i18n.t('success.sent_signed'),
     );
 
     await host.storage.set(INTENT_KEY, {});
     return false;
   } catch (err: any) {
     host.log.error('onComposeSend failed', err);
-    host.toast.error(`OpenPGP send failed: ${err && err.message ? err.message : String(err)}`);
+    const errMsg = err && err.message ? err.message : String(err);
+    host.toast.error(`${host.i18n.t('error.send_failed_prefix')}${errMsg}`);
     return false;
   }
 }

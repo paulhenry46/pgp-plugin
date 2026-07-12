@@ -7,11 +7,15 @@ export async function askForDefaultKeyPass(api: any): Promise<void> {
 
   if (defaultKey) {
     const result = await api.ui.prompt({
-      title: "Unlock your default key",
-      message: "Unlock your default key to unlock all features of PGP plugin",
-      fields: [{ name: 'passphrase', label: 'Passphrase', type: 'password', required: true }]
+      title: api.i18n.t('prompt.unlock_default_key.title'),
+      message: api.i18n.t('prompt.unlock_default_key.message'),
+      fields: [{ 
+        name: 'passphrase', 
+        label: api.i18n.t('prompt.unlock_default_key.passphrase_label'), 
+        type: 'password', 
+        required: true 
+      }]
     });
-
     if (!result || !result.passphrase) {
       return; 
     }
