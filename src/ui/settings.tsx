@@ -17,6 +17,7 @@ import {
   broadcastLockKey,
   subscribeToKeyUpdates
 } from '../pgp/session-broadcast.ts';
+import { uploadKey, requestVerify, lookup } from '../pgp/server.ts';
 
 export function SettingsSection() {
   const [keys, setKeys] = useState<KeyRecord[]>([]);
@@ -27,6 +28,7 @@ export function SettingsSection() {
   
   const fileRef = useRef<HTMLInputElement | null>(null);
   const certFileRef = useRef<HTMLInputElement | null>(null);
+  const [searchEmail, setSearchEmail] = useState<string>('');
 
   const refresh = useCallback(async () => {
     if (!(await isCapable())) { setCapable(false); return; }
@@ -137,6 +139,50 @@ export function SettingsSection() {
     } catch (err) {
       const error = err as Error;
       host.toast.error(error?.message ? error.message : 'Unlock failed');
+    } finally {
+      setBusy(false);
+    }
+  }
+  async function handleUploadKey(c: PublicCert) {
+    setBusy(true);
+    try {
+      // @ts-ignore - récupère le texte de la clé publique (ajuste selon ton type exact c.publicKey ou c.armored)
+      const armored = c.publicKey || c.armored; 
+      if (!armored) throw new Error("Could not find armored public key in storage.");
+
+      const res = await uploadKey(armored);
+      host.toast.success(`Key uploaded successfully!`);
+      
+      if (c.email) {
+        await requestVerify(res.token, [c.email]);
+        host.toast.info(`Verification email sent to ${c.email}. Please check your inbox.`);
+      }
+    } catch (err) {
+      const error = err as Error;
+      host.toast.error(`Upload failed: ${error?.message ? error.message : String(err)}`);
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function handleSearchAndImportKey(e?: React.FormEvent) {
+    console.log('handleSearchAndImportKey', e);
+    if (e) e.preventDefault();
+    if (!searchEmail || !searchEmail.includes('@')) return;
+    setBusy(true);
+    try {
+      const { armored, email } = await lookup(searchEmail);
+      if (!armored) {
+        host.toast.error(`No public key found for ${email} on keys.openpgp.org.`);
+        return;
+      }
+      await importOpenPgpPublicKey(armored);
+      host.toast.success(`Public key for ${email} imported successfully!`);
+      setSearchEmail('');
+      await refresh();
+    } catch (err) {
+      const error = err as Error;
+      host.toast.error(`Search failed: ${error?.message ? error.message : String(err)}`);
     } finally {
       setBusy(false);
     }
@@ -481,7 +527,19 @@ export function SettingsSection() {
                     h('path', { d: 'M8 6V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2' })
                   ])
                 )
-              : h('div', { style: { fontSize: '12px', color: 'var(--color-muted-foreground, #64748b)', fontStyle: 'italic', paddingRight: '8px' } }, host.i18n.t('settings.linked_to_private'))
+              : h('button', {
+                  type: 'button',
+                  className: 'lock-btn',
+                  style: { ...btn, color: 'var(--color-foreground)'},
+                  title: 'Upload to keys.openpgp.org',
+                  disabled: busy,
+                  onClick: () => handleUploadKey(c)
+                }, [
+                  h('svg', { xmlns: 'http://www.w3.org/2000/svg', width: '14px', height: '14px', viewBox: '0 0 24 24', fill: 'none', stroke: 'currentColor', strokeWidth: '2', strokeLinecap: 'round', strokeLinejoin: 'round' }, [
+                    h('path', { d: 'M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4' }), h('polyline', { points: '17 8 12 3 7 8' }), h('line', { x1: '12', y1: '3', x2: '12', y2: '15' })
+                  ]),
+                ]),
+              
           )),
         ),
         
@@ -519,6 +577,36 @@ export function SettingsSection() {
           host.i18n.t('settings.add_public_key')
         ])
       ),
+      h('div', { style: { ...card, marginTop: '16px', backgroundColor: 'var(--color-muted, #f8fafc)' } },
+      h('h4', { style: { margin: '0 0 6px', fontSize: '14px', fontWeight: 600 } }, 'Lookup & Import Key from OpenPGP Directory'),
+      h('p', { style: { margin: '0 0 10px', fontSize: '12px', color: 'var(--color-muted-foreground)' } }, 'Find a contact\'s public key by their email address via keys.openpgp.org.'),
+      h('div', { style: { display: 'flex', gap: '8px' } },
+        h('input', {
+          type: 'email',
+          style: {
+            height: '2.25rem', padding: '0 0.75rem', borderRadius: '0.375rem', flex: 1,
+            border: '1px solid var(--color-border, #e2e8f0)', backgroundColor: 'var(--color-background, #ffffff)',
+            color: 'var(--color-foreground, #0f172a)', outline: 'none'
+          },
+          placeholder: 'contact@example.com',
+          value: searchEmail,
+          onChange: (e) => setSearchEmail((e.target as HTMLInputElement).value),
+          disabled: busy,
+          required: true
+        }),
+        h('button', {
+          className: 'composer-btn',
+          disabled: busy || !searchEmail,
+          onClick: () => handleSearchAndImportKey(),
+          style: { padding: '0 12px' }
+        }, [
+          h('svg', { xmlns: 'http://www.w3.org/2000/svg', width: '16px', height: '16px', viewBox: '0 0 24 24', fill: 'none', stroke: 'currentColor', strokeWidth: '2', strokeLinecap: 'round', strokeLinejoin: 'round', style: { marginRight: '6px' } }, [
+            h('circle', { cx: '11', cy: '11', r: '8' }), h('line', { x1: '21', y1: '21', x2: '16.65', y2: '16.65' })
+          ]),
+          'Search'
+        ])
+      )
+    )
     ),
   );
 }

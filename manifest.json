@@ -20,7 +20,11 @@
     "ui:email-banner",
     "ui:settings-section",
     "app:lifecycle",
-    "ui:email-details"
+    "ui:email-details",
+    "http:fetch"
+  ],
+  "httpOrigins": [
+    "https://keys.openpgp.org"
   ],
   "entrypoint": "index.js",
   "minAppVersion": "1.7.6",
