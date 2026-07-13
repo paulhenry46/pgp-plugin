@@ -1,19 +1,16 @@
 {
-  "name": "bulwark-plugin-openpgp",
+  "name": "bulwark-openpgp-true-e2e",
   "version": "1.0.0",
   "private": true,
   "type": "module",
   "scripts": {
-    "build": "esbuild ./src/index.tsx --bundle --format=cjs --platform=browser --charset=utf8 --alias:crypto=./src/node-crypto-shim.js --outfile=dist/index.js --external:react --external:react-dom --external:react-dom/client --external:react/jsx-runtime --external:@plugin-host",
+    "build": "esbuild ./src/index.tsx --bundle --format=cjs --platform=browser --charset=utf8 --outfile=dist/index.js --external:react --external:react-dom --external:react-dom/client --external:react/jsx-runtime --external:@plugin-host",
     "dev": "npm run build -- --watch",
     "package": "npm run build && cp manifest.json dist/ && cd dist && zip -X ../openpgp.zip manifest.json index.js"
   },
   "dependencies": {
-    "asn1js": "^3.0.10",
     "mimetext": "^3.0.28",
-    "openpgp": "^6.3.1",
-    "pkijs": "^3.4.0",
-    "pvtsutils": "^1.3.6"
+    "openpgp": "^6.3.1"
   },
   "devDependencies": {
     "@types/node": "^26.1.0",
