@@ -12,7 +12,6 @@ import {
 import { importOpenPgpPrivateKey, importOpenPgpPublicKey, unlockPrivateKey } from '../pgp/import.ts';
 import { btn, fmtDate, isExpired, card } from './shared.ts';
 import { isCapable, NOT_PRIVILEGED_MSG } from '../index.tsx';
-import { registerWebAuthnPRF, getWebAuthnPRF } from '../webauthn/index.ts';
 import { encryptPassphraseWithWebAuthn, decryptPassphraseWithWebAuthn } from '../webauthn/settings.ts';
 
 import { 
@@ -101,116 +100,111 @@ export function SettingsSection() {
       const { keyRecord } = await importOpenPgpPrivateKey(text, storagePass, currentPass);
       
       await saveKeyRecord(keyRecord);
-      host.toast.success(`Imported OpenPGP key for ${keyRecord.email || 'identity'}`);
+      host.toast.success(host.i18n.t('settings.success.private_key_imported', { identity: keyRecord.email || host.i18n.t('settings.label.generic_identity') }));
       await refresh();
     } catch (err) {
       const error = err as Error;
-      host.toast.error(`Import failed: ${error?.message ? error.message : String(err)}`);
+      host.toast.error(host.i18n.t('settings.error.import_failed', { message: error?.message ? error.message : String(err) }));
     } finally {
       if (fileRef.current) fileRef.current.value = '';
       setBusy(false);
     }
   }
 
-  // 1. Liaison d'une clé existante à WebAuthn (Bouton d'enrôlement)
   async function handleLinkWebAuthn(rec: KeyRecord) {
-  let passphrase = "";
+    let passphrase = "";
 
-  // 1. On récupère la passphrase. Idéalement via une invite utilisateur pour être sûr de l'avoir
-  const result = await host.ui.prompt({
-    title: "Activer WebAuthn",
-    message: `Veuillez saisir la passphrase de votre clé pour lier votre empreinte/Bitwarden.`,
-    fields: [{ name: 'passphrase', label: 'Passphrase actuelle', type: 'password', required: true }]
-  });
-  
-  if (!result || !result.passphrase) return;
-  passphrase = result.passphrase;
-
-  // Optionnel : Valider rapidement que la passphrase est la bonne avant d'aller plus loin
-  try {
-    await unlockPrivateKey(rec, passphrase);
-  } catch {
-    host.toast.error("Passphrase incorrecte. Liaison annulée.");
-    return;
-  }
-
-  setBusy(true);
-  try {
-    // 1. On cherche si une autre clé possède déjà le Master Passkey dans IndexedDB
-    const existingKeyWithWebAuthn = keys.find(k => k.webauthn?.credentialId);
-    const masterCredIdBytes = existingKeyWithWebAuthn?.webauthn
-      ? bufferToBytes(existingKeyWithWebAuthn.webauthn.credentialId)
-      : undefined;
-
-    // 2. Appel à l'unique API du Host
-    const response = await host.webauthn.getOrCreatePRF(masterCredIdBytes, 'bulwark-webmail-pgp-true-e2e', 'Master Key for Bulwark PGP Plugin');
-    
-    const credentialId = bytesToBuffer(response.credentialId);
-    const prfSecret = bytesToBuffer(response.prfSecret);
-    
-    // 3. Chiffrement de la passphrase PGP
-    const { ciphertext, iv } = await encryptPassphraseWithWebAuthn(passphrase, prfSecret);
-
-    // 4. Sauvegarde locale (Chaque clé aura son propre ciphertext mais le même credentialId)
-    await saveKeyRecord({
-      ...rec,
-      webauthn: {
-        credentialId,
-        encryptedPassphrase: ciphertext,
-        iv: iv.buffer.slice(0) as ArrayBuffer
-      }
+    const result = await host.ui.prompt({
+      title: host.i18n.t('prompt.link_webauthn.title'),
+      message: host.i18n.t('prompt.link_webauthn.message'),
+      fields: [{ 
+        name: 'passphrase', 
+        label: host.i18n.t('prompt.link_webauthn.passphrase_label'), 
+        type: 'password', 
+        required: true 
+      }]
     });
-
-    host.toast.success(
-      masterCredIdBytes 
-        ? "Clé liée au Passkey de l'extension !" 
-        : "Passkey de l'extension créé et clé liée !"
-    );
-    await refresh();
-  } catch (err: any) {
-    host.toast.error(`Échec : ${err.message}`);
-  } finally {
-    setBusy(false);
-  }
-}
-
-  async function handleUnlockAllWithWebAuthn() {
-  const webauthnKeys = keys.filter(k => k.webauthn && !unlocked[k.id]);
-  if (webauthnKeys.length === 0) return;
-
-  setBusy(true);
-  try {
-    // Comme toutes les clés partagent le même Passkey, on prend le credentialId de la première clé éligible
-    const firstWebAuthnKey = webauthnKeys[0].webauthn!;
-    const masterCredIdBytes = bufferToBytes(firstWebAuthnKey.credentialId);
-
-    // 1. Un SEUL et unique appel au Host pour réveiller TouchID/Bitwarden pour toute la boucle
-    const response = await host.webauthn.getOrCreatePRF(masterCredIdBytes);
-    const prfSecret = bytesToBuffer(response.prfSecret);
-
-    // 2. Déchiffrement en chaîne de toutes les clés en mémoire avec le secret obtenu
-    for (const rec of webauthnKeys) {
-      if (!rec.webauthn) continue;
-
-      const realPassphrase = await decryptPassphraseWithWebAuthn(
-        rec.webauthn.encryptedPassphrase,
-        prfSecret,
-        rec.webauthn.iv
-      );
-
-      const { unlockedPrivateKey, signingKey, decryptionKey, aesKey } = await unlockPrivateKey(rec, realPassphrase);
-      
-      broadcastUnlockKey({ id: rec.id, unlockedPrivateKey, signingKey, decryptionKey, aesKey });
+    
+    if (!result || !result.passphrase) return;
+    passphrase = result.passphrase;
+    try {
+      await unlockPrivateKey(rec, passphrase);
+    } catch {
+      host.toast.error(host.i18n.t('settings.error.incorrect_passphrase'));
+      return;
     }
 
-    host.toast.success("Toutes vos clés ont été déverrouillées simultanément !");
-    await refresh();
-  } catch (err: any) {
-    host.toast.error(`Erreur de déverrouillage : ${err?.message || String(err)}`);
-  } finally {
-    setBusy(false);
+    setBusy(true);
+    try {
+
+      const existingKeyWithWebAuthn = keys.find(k => k.webauthn?.credentialId);
+      const masterCredIdBytes = existingKeyWithWebAuthn?.webauthn
+        ? bufferToBytes(existingKeyWithWebAuthn.webauthn.credentialId)
+        : undefined;
+
+      const response = await host.webauthn.getOrCreatePRF(masterCredIdBytes, 'bulwark-webmail-pgp-true-e2e', 'Master Key for Bulwark PGP Plugin');
+      
+      const credentialId = bytesToBuffer(response.credentialId);
+      const prfSecret = bytesToBuffer(response.prfSecret);
+      
+      const { ciphertext, iv } = await encryptPassphraseWithWebAuthn(passphrase, prfSecret);
+
+      await saveKeyRecord({
+        ...rec,
+        webauthn: {
+          credentialId,
+          encryptedPassphrase: ciphertext,
+          iv: iv.buffer.slice(0) as ArrayBuffer
+        }
+      });
+
+      host.toast.success(
+        masterCredIdBytes 
+          ? host.i18n.t('settings.success.webauthn_linked_existing') 
+          : host.i18n.t('settings.success.webauthn_linked_new')
+      );
+      await refresh();
+    } catch (err: any) {
+      host.toast.error(host.i18n.t('settings.error.generic_failure', { message: err.message }));
+    } finally {
+      setBusy(false);
+    }
   }
-}
+
+  async function handleUnlockAllWithWebAuthn() {
+    const webauthnKeys = keys.filter(k => k.webauthn && !unlocked[k.id]);
+    if (webauthnKeys.length === 0) return;
+
+    setBusy(true);
+    try {
+      const firstWebAuthnKey = webauthnKeys[0].webauthn!;
+      const masterCredIdBytes = bufferToBytes(firstWebAuthnKey.credentialId);
+
+      const response = await host.webauthn.getOrCreatePRF(masterCredIdBytes);
+      const prfSecret = bytesToBuffer(response.prfSecret);
+      
+      for (const rec of webauthnKeys) {
+        if (!rec.webauthn) continue;
+
+        const realPassphrase = await decryptPassphraseWithWebAuthn(
+          rec.webauthn.encryptedPassphrase,
+          prfSecret,
+          rec.webauthn.iv
+        );
+
+        const { unlockedPrivateKey, signingKey, decryptionKey, aesKey } = await unlockPrivateKey(rec, realPassphrase);
+        
+        broadcastUnlockKey({ id: rec.id, unlockedPrivateKey, signingKey, decryptionKey, aesKey });
+      }
+
+      host.toast.success(host.i18n.t('settings.success.unlock_all_webauthn'));
+      await refresh();
+    } catch (err: any) {
+      host.toast.error(host.i18n.t('settings.error.unlock_all_failed', { message: err?.message || String(err) }));
+    } finally {
+      setBusy(false);
+    }
+  }
 
   async function initiateUnlock(rec: KeyRecord) {
     const identity = rec.email || host.i18n.t('prompt.unlock_key.fallback_identity');
@@ -240,11 +234,11 @@ export function SettingsSection() {
         aesKey: aesKey,
       });
       
-      host.toast.success(`Unlocked ${rec.email || 'key'}`);
+      host.toast.success(host.i18n.t('settings.success.key_unlocked', { identity: rec.email || host.i18n.t('settings.label.generic_key') }));
       await refresh();
     } catch (err) {
       const error = err as Error;
-      host.toast.error(error?.message ? error.message : 'Unlock failed');
+      host.toast.error(host.i18n.t('settings.error.unlock_failed', { message: error?.message ? error.message : host.i18n.t('settings.error.fallback_unlock_failed') }));
     } finally {
       setBusy(false);
     }
@@ -254,18 +248,18 @@ export function SettingsSection() {
     try {
       // @ts-ignore - récupère le texte de la clé publique (ajuste selon ton type exact c.publicKey ou c.armored)
       const armored = c.publicKey || c.armored; 
-      if (!armored) throw new Error("Could not find armored public key in storage.");
+      if (!armored) throw new Error(host.i18n.t('settings.error.no_armored_key'));
 
       const res = await uploadKey(armored);
-      host.toast.success(`Key uploaded successfully!`);
+      host.toast.success(host.i18n.t('settings.success.key_uploaded'));
       
       if (c.email) {
         await requestVerify(res.token, [c.email]);
-        host.toast.info(`Verification email sent to ${c.email}. Please check your inbox.`);
+        host.toast.info(host.i18n.t('settings.info.verification_email_sent', { email: c.email }));
       }
     } catch (err) {
       const error = err as Error;
-      host.toast.error(`Upload failed: ${error?.message ? error.message : String(err)}`);
+      host.toast.error(host.i18n.t('settings.error.upload_failed', { message: error?.message ? error.message : String(err) }));
     } finally {
       setBusy(false);
     }
@@ -279,16 +273,16 @@ export function SettingsSection() {
     try {
       const { armored, email } = await lookup(searchEmail);
       if (!armored) {
-        host.toast.error(`No public key found for ${email} on keys.openpgp.org.`);
+        host.toast.error(host.i18n.t('settings.error.no_key_found_directory', { email }));
         return;
       }
       await importOpenPgpPublicKey(armored);
-      host.toast.success(`Public key for ${email} imported successfully!`);
+      host.toast.success(host.i18n.t('settings.success.key_imported', { email }));
       setSearchEmail('');
       await refresh();
     } catch (err) {
       const error = err as Error;
-      host.toast.error(`Search failed: ${error?.message ? error.message : String(err)}`);
+      host.toast.error(host.i18n.t('settings.error.search_failed', { message: error?.message ? error.message : String(err) }));
     } finally {
       setBusy(false);
     }
@@ -296,22 +290,22 @@ export function SettingsSection() {
 
   async function lock(rec: KeyRecord) {
     broadcastLockKey();
-    host.toast.info(`Locked ${rec.email || 'key'}`);
+    host.toast.info(host.i18n.t('settings.info.key_locked', { identity: rec.email || host.i18n.t('settings.label.generic_key') }));
     await refresh();
   }
 
   async function removeKey(rec: KeyRecord) {
     const ok = await host.ui.confirm({
-      title: 'Delete OpenPGP key',
-      message: `Delete the private key and public identity for ${rec.email || 'this identity'}? You will no longer be able to decrypt mail encrypted to it.`,
+      title: host.i18n.t('settings.confirm.delete_private_title'),
+      message: host.i18n.t('settings.confirm.delete_private_msg', { identity: rec.email || host.i18n.t('settings.label.generic_identity') }),
       danger: true,
-      confirmLabel: 'Delete',
+      confirmLabel: host.i18n.t('settings.action.delete'),
     });
     if (!ok) return;
     
     broadcastLockKey();
     await deleteKeyRecord(rec.id);
-    host.toast.success('Key deleted');
+    host.toast.success(host.i18n.t('settings.success.key_deleted'));
     await refresh();
   }
 
@@ -322,12 +316,12 @@ export function SettingsSection() {
     try {
       const text = new TextDecoder().decode(await file.arrayBuffer());
       const email = await importOpenPgpPublicKey(text);
-      host.toast.success(`Imported public key for ${email}`);
+      host.toast.success(host.i18n.t('settings.success.file_imported', { email }));
       if (certFileRef.current) certFileRef.current.value = '';
       await refresh();
     } catch (err) {
       const error = err as Error;
-      host.toast.error(`Key import failed: ${error?.message ? error.message : String(err)}`);
+      host.toast.error(host.i18n.t('settings.error.file_import_failed', { message: error?.message ? error.message : String(err) }));
     } finally {
       setBusy(false);
     }
@@ -335,10 +329,10 @@ export function SettingsSection() {
 
   async function removeCert(c: PublicCert) {
     const ok = await host.ui.confirm({
-      title: 'Delete Public Key',
-      message: `Delete the public key for ${c.email}?`,
+      title: host.i18n.t('settings.confirm.delete_public_title'),
+      message: host.i18n.t('settings.confirm.delete_public_msg', { email: c.email }),
       danger: true,
-      confirmLabel: 'Delete',
+      confirmLabel: host.i18n.t('settings.action.delete'),
     });
     if (!ok) return;
     await deletePublicCert(c.id);
@@ -360,13 +354,13 @@ export function SettingsSection() {
       
       host.toast.success(
         isChecked 
-          ? `Key ${targetKey.email} defined as default for encryption` 
-          : `Default key removed`
+          ? host.i18n.t('settings.success.default_key_set', { email: targetKey.email }) 
+          : host.i18n.t('settings.success.default_key_removed')
       );
       await refresh();
     } catch (err) {
       const error = err as Error;
-      host.toast.error(`Erreur : ${error?.message ? error.message : String(err)}`);
+      host.toast.error(host.i18n.t('settings.error.generic', { message: error?.message ? error.message : String(err) }));
     } finally {
       setBusy(false);
     }
@@ -458,16 +452,23 @@ export function SettingsSection() {
             keys.some(k => k.webauthn && !unlocked[k.id]) && h('button', {
             type: 'button',
             className: 'composer-btn',
-            style: { marginBottom: '8px', border: '1px solid var(--color-accent, #2563eb)', color: 'var(--color-accent, #2563eb)' },
+            style: { width: '100%' },
             disabled: busy,
             onClick: handleUnlockAllWithWebAuthn
           }, [
-            h('svg', { xmlns: 'http://www.w3.org/2000/svg', width: '16px', height: '16px', viewBox: '0 0 24 24', fill: 'none', stroke: 'currentColor', strokeWidth: '2', style: { marginRight: '8px' } }, [
-              h('path', { d: 'M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z' }),
-              h('circle', { cx: '12', cy: '11', r: '3' }),
-              h('path', { d: 'M12 14v4' })
+            h('svg', { 
+              xmlns: 'http://www.w3.org/2000/svg', 
+              height: '16px', 
+              width: '16px', 
+              viewBox: '0 -960 960 960', 
+              fill: 'currentColor', 
+              style: { marginRight: '8px' } 
+            }, [
+              h('path', { 
+                d: 'M444-360h72q9 0 15.5-7.5T536-384l-19-105q20-10 31.5-29t11.5-42q0-33-23.5-56.5T480-640q-33 0-56.5 23.5T400-560q0 23 11.5 42t31.5 29l-19 105q-2 9 4.5 16.5T444-360Zm23 275q-6-1-12-3-135-45-215-166.5T160-516v-189q0-25 14.5-45t37.5-29l240-90q14-5 28-5t28 5l240 90q23 9 37.5 29t14.5 45v189q0 140-80 261.5T505-88q-6 2-12 3t-13 1q-7 0-13-1Zm13-79q104-33 172-132t68-220v-189l-240-90-240 90v189q0 121 68 220t172 132Zm0-316Z' 
+              })
             ]),
-            "Déverrouiller les clés avec le Passkey / Biométrie"
+            host.i18n.t('settings.action.unlock_all_webauthn')
           ]),
 
           ...keys.map((rec) => h('div', { key: rec.id, style: { ...card, display: 'flex', flexDirection: 'column', gap: '10px' } },
@@ -541,7 +542,7 @@ export function SettingsSection() {
                     ...btn, 
                     color: rec.webauthn ? 'var(--color-success, #16a34a)' : 'var(--color-muted-foreground)' 
                   },
-                  title: rec.webauthn ? "Biométrie Ok" : "Activer le déverrouillage par empreinte/Bitwarden",
+                  title: rec.webauthn ? host.i18n.t('settings.title.webauthn_ok') : host.i18n.t('settings.action.link_webauthn'),
                   disabled: busy,
                   onClick: () => handleLinkWebAuthn(rec)
                 }, 
@@ -549,15 +550,12 @@ export function SettingsSection() {
                     xmlns: 'http://www.w3.org/2000/svg', 
                     width: '1rem', 
                     height: '1rem', 
-                    viewBox: '0 0 24 24', 
-                    fill: 'none', 
-                    stroke: 'currentColor', 
-                    strokeWidth: '2',
-                    strokeLinecap: 'round',
-                    strokeLinejoin: 'round'
+                    viewBox: '0 -960 960 960', 
+                    fill: 'currentColor'
                   }, [
-                    h('path', { d: 'M2 18v3c0 .6.4 1 1 1h4v-3h3v-3h2l1.4-1.4c.4-.4.6-.9.6-1.4V11c0-2.8-2.2-5-5-5S7 8.2 7 11v1.6c0 .5-.2 1-.6 1.4L2 18z' }),
-                    h('circle', { cx: '17', cy: '7', r: '1' })
+                    h('path', { 
+                      d: 'M223.5-423.5Q200-447 200-480t23.5-56.5Q247-560 280-560t56.5 23.5Q360-513 360-480t-23.5 56.5Q313-400 280-400t-56.5-23.5ZM280-240q-100 0-170-70T40-480q0-100 70-170t170-70q67 0 121.5 33t86.5 87h335q8 0 15.5 3t13.5 9l80 80q6 6 8.5 13t2.5 15q0 8-2.5 15t-8.5 13L805-325q-5 5-12 8t-14 4q-7 1-14-1t-13-7l-52-39-57 43q-5 4-11 6t-12 2q-6 0-12.5-2t-11.5-6l-61-43h-47q-32 54-86.5 87T280-240Zm0-80q56 0 98.5-34t56.5-86h125l58 41v.5-.5l82-61 71 55 75-75h-.5.5l-40-40v-.5.5H435q-14-52-56.5-86T280-640q-66 0-113 47t-47 113q0 66 47 113t113 47Z' 
+                    })
                   ])
                 ),
                 h('button', {
@@ -679,7 +677,7 @@ export function SettingsSection() {
                   type: 'button',
                   className: 'lock-btn',
                   style: { ...btn, color: 'var(--color-foreground)'},
-                  title: 'Upload to keys.openpgp.org',
+                  title: host.i18n.t('settings.action.upload'),
                   disabled: busy,
                   onClick: () => handleUploadKey(c)
                 }, [
@@ -726,8 +724,8 @@ export function SettingsSection() {
         ])
       ),
       h('div', { style: { ...card, marginTop: '16px', backgroundColor: 'var(--color-muted, #f8fafc)' } },
-      h('h4', { style: { margin: '0 0 6px', fontSize: '14px', fontWeight: 600 } }, 'Lookup & Import Key from OpenPGP Directory'),
-      h('p', { style: { margin: '0 0 10px', fontSize: '12px', color: 'var(--color-muted-foreground)' } }, 'Find a contact\'s public key by their email address via keys.openpgp.org.'),
+      h('h4', { style: { margin: '0 0 6px', fontSize: '14px', fontWeight: 600 } }, host.i18n.t('settings.search_public_key_title')),
+      h('p', { style: { margin: '0 0 10px', fontSize: '12px', color: 'var(--color-muted-foreground)' } }, host.i18n.t('settings.search_public_key_desc')),
       h('div', { style: { display: 'flex', gap: '8px' } },
         h('input', {
           type: 'email',
