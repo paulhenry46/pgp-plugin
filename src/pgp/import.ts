@@ -26,7 +26,7 @@ interface UnlockResult {
   unlockedPrivateKey: string;
   signingKey: string;
   decryptionKey: string;
-  aesKey: CryptoKey;
+  aesKey?: CryptoKey;
 }
 
 // ── Main Core Functions ───────────────────────────────────────────────
@@ -155,15 +155,24 @@ export async function unlockPrivateKey(record: KeyRecord, passphrase: string): P
       throw new Error(`Failed to decrypt internal OpenPGP packets: ${err.message}`);
     }
   }
-  const aesKey = await deriveAesKeyFromPgpParams(passphrase, record.salt, record.kdfIterations);
-  await getIndex(aesKey, passphrase, record);
+  if(record.default === true){
+      const aesKey = await deriveAesKeyFromPgpParams(passphrase, record.salt, record.kdfIterations);
+      await getIndex(aesKey, passphrase, record);
 
-  return {
+      return {
     unlockedPrivateKey: openPgpPrivateKey.armor(),
     signingKey: openPgpPrivateKey.armor(),
     decryptionKey: openPgpPrivateKey.armor(),
     aesKey // Retourné pour le composant UI et le Broadcast
+    };
+
+  }else{
+    return {
+    unlockedPrivateKey: openPgpPrivateKey.armor(),
+    signingKey: openPgpPrivateKey.armor(),
+    decryptionKey: openPgpPrivateKey.armor(),
   };
+  }
 }
 
 export async function importOpenPgpPublicKey(armoredPublicKeyText: string): Promise<any> {
