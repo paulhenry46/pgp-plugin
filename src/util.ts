@@ -94,6 +94,22 @@ export function bytesArrayBuffer(u8: Uint8Array) {
   return u8.buffer.slice(u8.byteOffset, u8.byteOffset + u8.byteLength) as ArrayBuffer;
 }
 
+/**
+ * Convertit un ArrayBuffer en tableau de nombres (number[]) 
+ * pour pouvoir le transférer proprement via le pont RPC JSON/postMessage.
+ */
+export function bufferToBytes(buffer: ArrayBuffer): number[] {
+  return Array.from(new Uint8Array(buffer));
+}
+
+/**
+ * Reconstruit un ArrayBuffer à partir d'un tableau de nombres (number[])
+ * reçu depuis le pont RPC, prêt à être utilisé par WebCrypto ou stocké dans IndexedDB.
+ */
+export function bytesToBuffer(bytes: number[]): ArrayBuffer {
+  return new Uint8Array(bytes).buffer;
+}
+
 
 export async function fetchBlobAsDataUrl(blobId: string, options?: { name?: string; type?: string }): Promise<string> {
   // 1. Récupérer le Uint8Array

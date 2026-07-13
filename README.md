@@ -14,6 +14,7 @@ It use the MIME/S plugin as foundation.
 - **Encrypted-at-Rest Local Search Index** —  **PGP True E2E** securely decrypts and indexes your emails into a local, encrypted-at-rest database. Search your secure history instantly without leaking a single keyword to the server or writing decrypted text to the disk.
 - **Automated Key Exchange** — Automatically detects and imports public keys attached to incoming signed emails, making recipient keyring management effortless.
 - **Keyserver Integration** — Seamlessly publish your public key to or fetch recipient keys from keys.openpgp.org directly within the interface.
+- **WebAuthn** —  Don't want to type your passphrase every time you go to client ? Just use the webAUthn feature. Unlock your keys with one click !
 
 
 ## Security model

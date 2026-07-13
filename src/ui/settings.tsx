@@ -23,6 +23,7 @@ import {
 } from '../pgp/session-broadcast.ts';
 import { uploadKey, requestVerify, lookup } from '../pgp/server.ts';
 import { deriveAesKeyFromPgpParams, getIndex } from '../cache.ts';
+import { bufferToBytes, bytesToBuffer } from '../util.ts';
 
 export function SettingsSection() {
   const [keys, setKeys] = useState<KeyRecord[]>([]);
@@ -135,13 +136,22 @@ export function SettingsSection() {
 
   setBusy(true);
   try {
-    // 2. Déclenche l'enregistrement Passkey (Bitwarden / TouchID)
-    const { credentialId, prfSecret } = await registerWebAuthnPRF(rec.email || "user@pgp");
+    // 1. On cherche si une autre clé possède déjà le Master Passkey dans IndexedDB
+    const existingKeyWithWebAuthn = keys.find(k => k.webauthn?.credentialId);
+    const masterCredIdBytes = existingKeyWithWebAuthn?.webauthn
+      ? bufferToBytes(existingKeyWithWebAuthn.webauthn.credentialId)
+      : undefined;
+
+    // 2. Appel à l'unique API du Host
+    const response = await host.webauthn.getOrCreatePRF(masterCredIdBytes, 'bulwark-webmail-pgp-true-e2e', 'Master Key for Bulwark PGP Plugin');
     
-    // 3. Chiffre la VRAIE passphrase avec le secret WebAuthn
+    const credentialId = bytesToBuffer(response.credentialId);
+    const prfSecret = bytesToBuffer(response.prfSecret);
+    
+    // 3. Chiffrement de la passphrase PGP
     const { ciphertext, iv } = await encryptPassphraseWithWebAuthn(passphrase, prfSecret);
 
-    // 4. Sauvegarde dans IndexedDB
+    // 4. Sauvegarde locale (Chaque clé aura son propre ciphertext mais le même credentialId)
     await saveKeyRecord({
       ...rec,
       webauthn: {
@@ -151,11 +161,14 @@ export function SettingsSection() {
       }
     });
 
-    host.toast.success("Authentification biométrique activée !");
+    host.toast.success(
+      masterCredIdBytes 
+        ? "Clé liée au Passkey de l'extension !" 
+        : "Passkey de l'extension créé et clé liée !"
+    );
     await refresh();
-  } catch (err) {
-    const error = err as Error;
-    host.toast.error(`Échec WebAuthn : ${error?.message || String(err)}`);
+  } catch (err: any) {
+    host.toast.error(`Échec : ${err.message}`);
   } finally {
     setBusy(false);
   }
@@ -167,37 +180,33 @@ export function SettingsSection() {
 
   setBusy(true);
   try {
+    // Comme toutes les clés partagent le même Passkey, on prend le credentialId de la première clé éligible
+    const firstWebAuthnKey = webauthnKeys[0].webauthn!;
+    const masterCredIdBytes = bufferToBytes(firstWebAuthnKey.credentialId);
+
+    // 1. Un SEUL et unique appel au Host pour réveiller TouchID/Bitwarden pour toute la boucle
+    const response = await host.webauthn.getOrCreatePRF(masterCredIdBytes);
+    const prfSecret = bytesToBuffer(response.prfSecret);
+
+    // 2. Déchiffrement en chaîne de toutes les clés en mémoire avec le secret obtenu
     for (const rec of webauthnKeys) {
       if (!rec.webauthn) continue;
 
-      // 1. Récupère le secret PRF depuis le gestionnaire
-      const prfSecret = await getWebAuthnPRF(rec.webauthn.credentialId);
-      
-      // 2. Déchiffre la VRAIE passphrase originale
       const realPassphrase = await decryptPassphraseWithWebAuthn(
         rec.webauthn.encryptedPassphrase,
         prfSecret,
         rec.webauthn.iv
       );
 
-      // 3. Appelle la fonction d'origine ! Elle gère déjà le PGP, la aesKey et le getIndex()
       const { unlockedPrivateKey, signingKey, decryptionKey, aesKey } = await unlockPrivateKey(rec, realPassphrase);
       
-      // 4. Envoie le tout au background
-      broadcastUnlockKey({
-        id: rec.id,
-        unlockedPrivateKey,
-        signingKey,
-        decryptionKey,
-        aesKey
-      });
+      broadcastUnlockKey({ id: rec.id, unlockedPrivateKey, signingKey, decryptionKey, aesKey });
     }
 
-    host.toast.success("Clés déverrouillées avec succès via WebAuthn !");
+    host.toast.success("Toutes vos clés ont été déverrouillées simultanément !");
     await refresh();
-  } catch (err) {
-    const error = err as Error;
-    host.toast.error(`Erreur de déverrouillage : ${error?.message || String(err)}`);
+  } catch (err: any) {
+    host.toast.error(`Erreur de déverrouillage : ${err?.message || String(err)}`);
   } finally {
     setBusy(false);
   }
