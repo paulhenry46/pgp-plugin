@@ -268,7 +268,6 @@ export function SettingsSection() {
   }
 
   async function handleSearchAndImportKey(e?: React.FormEvent) {
-    console.log('handleSearchAndImportKey', e);
     if (e) e.preventDefault();
     if (!searchEmail || !searchEmail.includes('@')) return;
     setBusy(true);

@@ -106,13 +106,10 @@ async function fetchAttachments(req: ComposeRequest) {
 }
     
 export async function onComposeSend(req: ComposeRequest): Promise<boolean | undefined> {
-  console.log(req);
   if (!req || typeof req !== 'object') return undefined;
 
   const { sign, encrypt } = await resolveIntent(req);
-  console.log('sign:', sign, 'encrypt:', encrypt);
   if (!sign && !encrypt) return undefined;
-  console.log('on continue');
   if (!(await isCapable())) {
     host.toast.error(host.i18n.t('error.not_privileged_tier'));
     return false;
@@ -128,7 +125,6 @@ export async function onComposeSend(req: ComposeRequest): Promise<boolean | unde
     if (!from.addr) throw new Error(host.i18n.t('error.no_sender_address'));
     const allRecipientEmails = [...emailsOf(req.to), ...emailsOf(req.cc), ...emailsOf(req.bcc)];
 
-    console.log('from:' ,req.fromEmail, from.addr);
     let keyRecord: KeyRecord | undefined = undefined;
     if (sign || encrypt) {
       keyRecord = await signingKeyRecordForEmail(from.addr);
@@ -151,7 +147,6 @@ export async function onComposeSend(req: ComposeRequest): Promise<boolean | unde
       });
     }
 
-    console.log('build Message')
     const clearMimeBytes = buildMimeMessage({
       from,
       to :req.to,
@@ -165,16 +160,13 @@ export async function onComposeSend(req: ComposeRequest): Promise<boolean | unde
     });
 
     let finalEnvelopeBlob: Blob | undefined;
-    console.log('builded Message');
     
     const currentKeyRecord = keyRecord as KeyRecord;
     const session = await fetchKeyFromBackground(currentKeyRecord.id);
 
     // 2. Process cryptographic combinations (Sign, Encrypt, or Sign+Encrypt)
     if (encrypt) {
-      console.log('encrypt Message');
       const { found, missing } = await recipientKeysFor(allRecipientEmails);
-      console.log('RecipientKey :', found);
       if (missing.length > 0) {
         host.toast.error(`${host.i18n.t('error.missing_encryption_key_prefix')}${missing.join(', ')}`);
         return false;
@@ -183,7 +175,6 @@ export async function onComposeSend(req: ComposeRequest): Promise<boolean | unde
       // Resolve the signing key if required
       let signingKeyForEncrypt: openpgp.PrivateKey | undefined = undefined;
       if (sign) {
-        console.log('preparing native signing key for combined encryption');
         if (!session || !session.signingKey) {
           host.toast.error(host.i18n.t('error.key_locked'));
           return false;
@@ -203,9 +194,7 @@ export async function onComposeSend(req: ComposeRequest): Promise<boolean | unde
       finalEnvelopeBlob =  wrapAsPgpMimeEncrypted(encryptedBlob, {
         from, to: req.to, cc: req.cc, subject: req.subject || '', inReplyTo: req.inReplyTo, references: req.references, messageId: req.messageId
       });
-      console.log('finalEnvelopeBlob', finalEnvelopeBlob);
     } else if (sign) {
-      console.log('sign Message')
       // Case: Signature only (detached multipart/signed)
       if (!session || !session.signingKey) {
         host.toast.error(host.i18n.t('error.key_locked'));
@@ -224,16 +213,12 @@ export async function onComposeSend(req: ComposeRequest): Promise<boolean | unde
     if (!finalEnvelopeBlob) {
       throw new Error(host.i18n.t('error.cryptographic_failed'));
     }
-    console.log('finalEnvelopeBlob', finalEnvelopeBlob);
 
     const final_text = await finalEnvelopeBlob.text();
-    console.log('final text: ', final_text);
     const rawBytes = await blobToBytes(finalEnvelopeBlob);
     const envelopeRecipients = [...new Set([...allRecipientEmails])];
-    console.log('Sending raw bytes to JMAP:', rawBytes, 'Recipients:', envelopeRecipients);
 
     const result = await host.jmap.sendRaw(bytesArrayBuffer(rawBytes), identityId, { envelopeRecipients });
-    console.log(result);
 
     host.toast.success(
       encrypt && sign ? host.i18n.t('success.sent_signed_encrypted')

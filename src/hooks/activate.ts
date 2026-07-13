@@ -33,7 +33,7 @@ export async function askForDefaultKeyPass(api: any): Promise<void> {
         aesKey: aesKey,
       });
     } catch (error) {
-      console.error("Can't unlock key :", error);
+      throw new Error('Failed to unlock the default key: ' + (error instanceof Error ? error.message : String(error)));
     }
   }
 }

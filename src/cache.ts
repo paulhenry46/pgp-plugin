@@ -31,8 +31,6 @@ export async function getIndex(aesKey: CryptoKey, passphrase: string, record: Ke
       // 3. Déchiffrement global de l'index et chargement en RAM
       try {
         const allEncryptedCache = await getAllMessageCache();
-        console.log('allEncryptedCache',allEncryptedCache);
-        
         const decryptedIndexMemory: Record<string, DecryptedCachePayload> = {};
     
         // Déchiffrement asynchrone parallélisé de tous les blocs de cache
@@ -49,16 +47,15 @@ export async function getIndex(aesKey: CryptoKey, passphrase: string, record: Ke
               const jsonString = new TextDecoder().decode(decryptedBuffer);
               decryptedIndexMemory[item.id] = JSON.parse(jsonString) as DecryptedCachePayload;
             } catch (e) {
-              console.error(`Impossible de déchiffrer le cache du message ${item.id}`, e);
+              throw new Error(`Failed to decrypt cache for email ID ${item.id}: ${e instanceof Error ? e.message : String(e)}`);
             }
           })
         );
-        console.log('decryptedIndexMemory', decryptedIndexMemory);
         // Injection immédiate dans la structure RAM globale du plugin
         broadcastInitializeRamIndex(decryptedIndexMemory);
     
       } catch (dbErr) {
-        console.error("Erreur lors de la récupération ou du déchiffrement de l'index persistant :", dbErr);
+        throw new Error('Failed to load or decrypt the message cache: ' + (dbErr instanceof Error ? dbErr.message : String(dbErr)));
       }
 
       return 
@@ -95,7 +92,6 @@ export async function indexAndPersistDecryptedMail(
     const defaultKey = allKeys.find((k) => k.default === true);
 
     if (!defaultKey) {
-      console.warn(`[Plugin] Impossible d'indexer le mail ${mailId} : Aucune clé PGP par défaut n'est configurée.`);
       return;
     }
 
@@ -103,7 +99,6 @@ export async function indexAndPersistDecryptedMail(
     const sessionData = await fetchKeyFromBackground(defaultKey.id);
     
     if (!sessionData || !sessionData.aesKey) {
-      console.warn(`[Plugin] Impossible d'indexer le mail ${mailId} : Le plugin est verrouillé (pas de clé AES active).`);
       return; 
     }
     
@@ -114,8 +109,6 @@ export async function indexAndPersistDecryptedMail(
     const tokens = tokenizeText(clearText);
 
     const decryptedPayload: DecryptedCachePayload = { preview, tokens };
-    console.log(`[Plugin] Indexation autonome du mail ${mailId} avec ces token : ${tokens.join(', ')} tokens générés.`);
-    console.log(`[Plugin] Preview générée : "${preview}"`);
     // 4. Chiffrement AES-GCM local
     const textBytes = new TextEncoder().encode(JSON.stringify(decryptedPayload));
     const iv = crypto.getRandomValues(new Uint8Array(12)); // IV unique par mail
@@ -125,23 +118,18 @@ export async function indexAndPersistDecryptedMail(
       aesKey,
       textBytes
     );
-    console.log(`[Plugin] Payload chiffré généré pour le mail ${mailId}:`, encryptedPayload);
 
     const encryptedRecord: EncryptedMessageCache = {
       id: mailId,
       encryptedPayload: new Uint8Array(encryptedPayload),
       iv: iv
     };
-    console.log(`[Plugin] Payload final chiffré généré pour le mail ${mailId}:`, encryptedRecord);
-    // 5. Sauvegarde persistante chiffrée dans IndexedDB
+
     await saveMessageCache(encryptedRecord);
 
-    // 6. Envoi immédiat au Background Script pour alimenter la RAM active
     broadcastUpdateRamIndexEntry(mailId, decryptedPayload);
 
-    console.log(`[Plugin] Le message ${mailId} a été automatiquement indexé sous la clé par défaut.`);
   } catch (error) {
-    console.error(`[Plugin] Échec lors de l'indexation autonome du mail ${mailId}:`, error);
     throw error;
   }
 }

@@ -37,7 +37,7 @@ export async function pgpEncrypt(
       const parsedKey = await openpgp.readKey({ armoredKey: keyArmored });
       encryptionKeys.push(parsedKey);
     } catch (e: any) {
-      console.warn(`Unable to read a public key, it will be ignored: ${e.message}`);
+      throw new Error(`Failed to parse public key: ${e instanceof Error ? e.message : String(e)}`);
     }
   }
 
@@ -68,9 +68,6 @@ export async function pgpEncrypt(
 
   // 6. End-to-end encryption
   const encryptedArmored = await openpgp.encrypt(encryptOptions);
-
-  console.log('message:', message);
-  console.log('message encrypted:', encryptedArmored);
   
   // 7. Returns a text Blob in standard encrypted OpenPGP format
   return new Blob([encryptedArmored as string], { type: 'application/pgp-encrypted; charset=utf-8' });

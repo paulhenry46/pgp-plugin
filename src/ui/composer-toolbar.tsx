@@ -29,7 +29,6 @@ export function ComposerToolbar() {
         const stored = (await host.storage.get(INTENT_KEY)) || {};
         
         if (alive) {
-          console.log(settings());
           setIntent({
             sign: typeof stored.sign === 'boolean' ? stored.sign : !!settings().defaultSign,
             encrypt: typeof stored.encrypt === 'boolean' ? stored.encrypt : !!settings().defaultEncrypt,

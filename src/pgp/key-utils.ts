@@ -66,7 +66,6 @@ function extractAlgorithm(key: openpgp.PublicKey | openpgp.PrivateKey): string {
  * @returns {string[]}
  */
 function extractEmailAddresses(key: openpgp.PublicKey | openpgp.PrivateKey): string[] {
-  console.log('extract');
   const emails: string[] = [];
   const userIDs = key.users || [];
 
@@ -132,7 +131,6 @@ export function classifyCapabilities(key: openpgp.PublicKey | openpgp.PrivateKey
  * Includes the 'armoredPublicKey' property required for key import.
  */
 export async function extractKeyInfo(key: openpgp.PublicKey | openpgp.PrivateKey) {
-  console.log(key);
   const fingerprint = key.getFingerprint();
   const keyID = key.getKeyID().toHex().toUpperCase();
   
@@ -177,7 +175,7 @@ export async function extractKeyInfo(key: openpgp.PublicKey | openpgp.PrivateKey
     const publicKeyInstance = key.isPrivate() ? (key as openpgp.PrivateKey).toPublic() : key;
     armoredPublicKey = publicKeyInstance.armor();
   } catch (err) {
-    console.error('Failed to export armored public key string from instance', err);
+    throw new Error(`Failed to generate armored public key: ${err instanceof Error ? err.message : String(err)}`);
   }
 
   return {
@@ -199,7 +197,6 @@ export async function extractKeyInfo(key: openpgp.PublicKey | openpgp.PrivateKey
 //  Scan of attachments from the decapsulated message
 export async function scanAndImportKeysFromAttachments(attachments: any[]) {
     if (!attachments || attachments.length === 0) return;
-    console.log(`[PGP] Scanning attachments for PGP keys`, attachments);
     for (const att of attachments) {
       // Target common extensions of PGP public keys or armor MIME type
       const isKeyExtension = att.name && (
@@ -264,7 +261,6 @@ export async function scanAndImportKeysFromAttachments(attachments: any[]) {
 };
 
 async function maybeAutoImportSigner(pub:string) {
-  console.log('maybeAutoImportSigner', pub);
   if (host.plugin?.settings?.autoImportSignerCerts === false) return;
   const cert = pub; // Keep .signerCert for UI semantic compatibility
  

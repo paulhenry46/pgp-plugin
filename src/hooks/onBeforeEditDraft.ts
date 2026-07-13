@@ -7,11 +7,9 @@ import { unlockedDecryptMaps } from '../util.ts';
 export async function onBeforeEditDraft(email: any): Promise<any> {
   if(settings().encryptDrafts !== true) return email;
 
-  console.log('Editing draft email:', email);
   // 1. Cloner l'objet pour éviter de muter l'original de manière imprévue
   const modifiedEmail = { ...email };
   const { keyRecords, unlockedKeys } = await unlockedDecryptMaps();
-  console.log(keyRecords, unlockedKeys);
   const decoder = new TextDecoder('utf-8');
   const encoder = new TextEncoder();
   const indexText = modifiedEmail.textBody[0].partId;
@@ -29,7 +27,6 @@ export async function onBeforeEditDraft(email: any): Promise<any> {
     });
 
     let text = decoder.decode(decryptedTextResult.mimeBytes);
-    console.log('Decrypted text body:', text);
     // --- RESTAURATION DES ATTACHEMENTS ---
     if (modifiedEmail.hasAttachment) {
       const metadataRegex = /<--PGP_METADATA_START-->([\s\S]*?)<--PGP_METADATA_END-->/;
@@ -74,7 +71,7 @@ export async function onBeforeEditDraft(email: any): Promise<any> {
           text = text.replace(metadataRegex, '').trim();
 
         } catch (e) {
-          console.error("Erreur lors du parsing des métadonnées PGP :", e);
+          throw new Error('Failed to parse attachment metadata: ' + (e instanceof Error ? e.message : String(e)));
         }
       }
     }
@@ -82,7 +79,6 @@ export async function onBeforeEditDraft(email: any): Promise<any> {
     // Sauvegarde du texte nettoyé
     modifiedEmail.bodyValues[indexText].value = text;
   }
-  console.log('Modified text after all:', modifiedEmail.bodyValues[indexText].value);
 
   // --- DÉCHIFFREMENT DU CORPS HTML (Clé 2) ---
   const encryptedHtml = modifiedEmail.bodyValues?.[indexHtml]?.value;
@@ -98,6 +94,5 @@ export async function onBeforeEditDraft(email: any): Promise<any> {
 
     modifiedEmail.bodyValues[indexHtml].value = decoder.decode(decryptedHtmlResult.mimeBytes);
   }
-console.log('Modified email after decryption and restoration:', modifiedEmail);
   return modifiedEmail;
 }

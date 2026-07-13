@@ -62,7 +62,6 @@ export interface EmailReadView {
 
 
 export async function onEmailListItemRender(list: EmailListBadge[], context: Context): Promise<EmailListBadge[]> {
-  console.log('onEmailListItemRender called for emailId:', context.emailId);
   const status = await getEmailListStatus(context.emailId);
     if (status && status.isEncrypted){
       list.push({
@@ -71,10 +70,8 @@ export async function onEmailListItemRender(list: EmailListBadge[], context: Con
         color: 'var(--color-success)',
         title: 'This email is encrypted with PGP.',
       });
-      console.log(list);
       return list;
     }else{
-      console.log(list);
       return list;
     }
 }

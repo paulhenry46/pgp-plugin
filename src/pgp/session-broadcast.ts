@@ -56,7 +56,6 @@ export function initBackgroundSessionListener(): void {
 
       case 'INITIALIZE_RAM_INDEX':
         _ramDecryptedIndex = msg.decryptedIndex;
-        console.log(`[Background] Index RAM initialisé avec ${Object.keys(msg.decryptedIndex).length} messages.`);
         break;
 
       // 2. Traitement groupé des demandes de previews depuis le webmail
@@ -80,8 +79,6 @@ export function initBackgroundSessionListener(): void {
       }
       case 'UPDATE_RAM_INDEX_ENTRY':
       _ramDecryptedIndex[msg.id] = msg.payload;
-      console.log(`[Background] Entrée RAM mise à jour pour le mail : ${msg.id}`);
-      console.log(_ramDecryptedIndex);
       break;
     }
   };
@@ -92,7 +89,6 @@ export function getBackgroundSessionKey(id: string): SessionKeysEntry | null {
 }
 
 export function fetchKeyFromBackground(keyId: string): Promise<SessionKeysEntry | null> {
-    console.log('fetchKeyFromBackground called for keyId:', keyId);
   return new Promise((resolve) => {
     const channel = new BroadcastChannel(CHANNEL_NAME);
     const requestId = Math.random().toString(36).substring(2);
@@ -111,7 +107,6 @@ export function fetchKeyFromBackground(keyId: string): Promise<SessionKeysEntry 
     };
 
     channel.postMessage({ type: 'REQUEST_KEY_DATA', requestId, keyId });
-    console.log('fetchKeyFromBackground request sent for keyId:', keyId);
   });
 }
 

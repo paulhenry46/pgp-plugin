@@ -22,7 +22,6 @@ export function detectPgp(contentType: string, bodyStructure: any, bodyValues: a
       const { plainText, htmlText } = extractEmailContent(bodyStructure, bodyValues);
       if (plainText && htmlText) {
           if (plainText.includes('-----BEGIN PGP MESSAGE-----')) {
-            console.log('Detected PGP inline encrypted message in text body.');
             return { type: 'pgp-inline-encrypted', supported: true, htmlBody: htmlText, textBody: plainText };
           }
           if (plainText.includes('-----BEGIN PGP SIGNED MESSAGE-----')) {

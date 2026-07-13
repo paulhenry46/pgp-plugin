@@ -303,7 +303,6 @@ export async function exportPluginData(): Promise<void> {
     });
 
   } catch (error) {
-    console.error("Erreur lors de l'exportation:", error);
     throw new Error("Impossible d'exporter les données.");
   }
 }
@@ -377,7 +376,6 @@ export async function importPluginData(jsonContent: string): Promise<void> {
     });
 
   } catch (error) {
-    console.error("Erreur lors de l'importation:", error);
     throw error;
   }
 }

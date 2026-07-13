@@ -18,7 +18,6 @@ import { indexAndPersistDecryptedMail } from '../cache.ts';
  * Main entry point for rendering PGP-processed email bodies.
  */
 export async function onRenderEmailBody(body: any, ctx: any) {
-  console.log(ctx, body);
   if (!ctx || !(await isCapable())) return undefined;
 
   await host.storage.set(VERIFY_PREFIX + ctx.id, { isEncrypted: null, processing: true });
@@ -152,9 +151,7 @@ async function handleInlineEncrypted(
     if (match && match[1]) {
       try {
         const metadataMap: Record<string, { originalName: string; originalType: string }> = JSON.parse(match[1].trim());
-        console.log(metadataMap);
         if (ctx.attachments) {
-          console.log(ctx.attachments);
           const acc = [];
 
           for(const att of ctx.attachments){
@@ -196,11 +193,10 @@ async function handleInlineEncrypted(
         }
         textBody = textBody.replace(metadataRegex, '').trim();
       } catch (e) {
-        console.error(host.i18n.t('error.metadata_parse_failed'), e);
+        throw new Error('Failed to parse attachment metadata: ' + (e instanceof Error ? e.message : String(e)));
       }
     }else if(ctx.attachments && ctx.attachments.length > 0){
       const acc = [];
-      console.warn(host.i18n.t('warn.metadata_missing_attachments'));
       for(const att of ctx.attachments){
             
               const decryptedData = (await pgpDecrypt({
@@ -237,7 +233,6 @@ async function handleInlineEncrypted(
   const verif = { isEncrypted: true, decryptionSuccess: true, isSigned: false }
   await persistVerifyStatus(ctx.id, verif);
 
-  console.log(attachments);
   await indexAndPersistDecryptedMail(ctx.id, textBody)
   return {
     ...body,

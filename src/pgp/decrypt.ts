@@ -33,9 +33,7 @@ export async function pgpDecrypt(input: {
   const { cmsBytes, keyRecords, unlockedKeys, knownPublicKeys = [] } = input;
 
   // 1. Normalization of the input payload
-  console.log('[plugin:smime] : CmsBytes :', cmsBytes);
   const armoredMessage = normalizePgpMessage(cmsBytes);
-  console.log('[plugin:smime] : armored :', armoredMessage);
   let parsedMessage: openpgp.Message<string>;
   try {
     parsedMessage = await openpgp.readMessage({ armoredMessage });
@@ -56,22 +54,20 @@ export async function pgpDecrypt(input: {
     if (!unlockedPrivateKey) continue; // The key matches but is locked
 
     try {
-      console.log(`Attempt to decrypt with key ${keyRecord.id}...`); 
       
       const { data: decryptedBytes, signatures } = await openpgp.decrypt({
         message: parsedMessage,
         decryptionKeys: await clearArmoredPrivateKeyToPrivateKey(unlockedPrivateKey),
-        verificationKeys: knownPublicKeys, // 💡 Passing public keys for nested signature
+        verificationKeys: knownPublicKeys,
         format: 'binary'
       });
-      console.log('signature:', signatures);
       return { 
         mimeBytes: decryptedBytes, 
         keyRecordId: keyRecord.id,
         signatures: signatures 
       };
     } catch (e) {
-      console.warn(`Failed to decrypt with key ${keyRecord.id}, trying next...`, e);
+      throw new Error('Decryption failed with the unlocked key: ' + (e instanceof Error ? e.message : String(e)));
       continue;
     }
   }
@@ -98,7 +94,7 @@ export async function findDecryptionCandidates(cmsBytes: Uint8Array, keyRecords:
     const parsedMessage = await openpgp.readMessage({ armoredMessage });
     return (await findMatchingKeyRecords(parsedMessage, keyRecords)).map((r) => r.id);
   } catch (e) {
-    console.warn('Failed to find decryption candidates:', e);
+    throw new Error('Failed to identify decryption candidates: ' + (e instanceof Error ? e.message : String(e)));
     return [];
   }
 }
@@ -115,8 +111,6 @@ export async function findMatchingKeyRecords(
 ): Promise<KeyRecord[]> {
   // 1. Extract the Key IDs (in uppercase hexadecimal) used to encrypt the message
   const encryptionKeyIds = parsedMessage.getEncryptionKeyIDs().map(id => id.toHex().toUpperCase());
-  console.log('encryptionKeyIds:', encryptionKeyIds);
-  console.log('keyRecords:', keyRecords);
   const matches: KeyRecord[] = [];
 
   for (const record of keyRecords) {
@@ -135,7 +129,7 @@ export async function findMatchingKeyRecords(
       }
     } catch (err) {
       // We ignore a malformed key in storage to not block the rest of the loop
-      console.error(`Failed to parse public key for record ${record.id}:`, err);
+      throw new Error(`Failed to parse stored public key for record ${record.id}: ${err instanceof Error ? err.message : String(err)}`);
     }
   }
 

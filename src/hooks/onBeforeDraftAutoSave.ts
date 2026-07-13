@@ -26,7 +26,6 @@ interface AlmostSavedDraft{
   // pub key
   const key = await getDefaultPublicKeyForEncryption();
   if(!key) return draft; // If no key is found, return the draft as is
-  console.log('Default public key for draft auto-save:', key);
   const modifiedDraft = JSON.parse(JSON.stringify(draft)) as AlmostSavedDraft;
 
   // Si aucun attachement, on retourne le draft tel quel

@@ -62,7 +62,6 @@ export function EmailBanner(props: EmailProps) {
 
       if (s && !s.processing) {
         setStatus(s);
-        console.log('s',s);
         if (s.decryptionSuccess || (s.decryptionError && s.decryptionError !== 'locked') || s.signatureValid) {
           if (intervalId !== null) {
             clearInterval(intervalId);
@@ -157,7 +156,6 @@ export function EmailSecuBanner(props: EmailProps) {
       if (!alive) return;
       if (s && !s.processing) {
         setStatus(s);
-        console.log('s', s);
         if (s.decryptionSuccess || (s.decryptionError && s.decryptionError !== 'locked') || s.signatureValid) {
           if (intervalId !== null) {
             clearInterval(intervalId);
