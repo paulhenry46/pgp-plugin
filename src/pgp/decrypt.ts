@@ -1,10 +1,5 @@
-/**
- * Decrypt OpenPGP encrypted messages using local keys.
- * Replaces the legacy S/MIME CMS EnvelopedData decoder.
- */
-
 import * as openpgp from 'openpgp';
-import {KeyRecord} from '../storage.ts'; // Import the KeyRecord interface generated in the previous step
+import {KeyRecord} from '../storage.ts';
 import { clearArmoredPrivateKeyToPrivateKey } from '../util.ts';
 
 export class PgpKeyLockedError extends Error {
@@ -18,11 +13,6 @@ export class PgpKeyLockedError extends Error {
 
 /**
  * Attempts to decrypt an OpenPGP message.
- * @param {Object} input
- * @param {Uint8Array} input.cmsBytes - The bytes of the encrypted OpenPGP message.
- * @param {Array} input.keyRecords - Metadata of the user's private keys from IndexedDB.
- * @param {Map} input.unlockedKeys - Map (keyRecordId -> unlocked openpgp.PrivateKey) for this session.
- * @returns {Promise<{ mimeBytes: Uint8Array, keyRecordId: string }>}
  */
 export async function pgpDecrypt(input: { 
   cmsBytes: Uint8Array, 
@@ -103,8 +93,6 @@ export async function findDecryptionCandidates(cmsBytes: Uint8Array, keyRecords:
  * Filters the user's keyRecords to find those whose Key ID matches
  * one of the target Key IDs embedded in the packets of the PGP message.
  */
-
-
 export async function findMatchingKeyRecords(
   parsedMessage: openpgp.Message<string> | openpgp.Message<Uint8Array>, 
   keyRecords: KeyRecord[]

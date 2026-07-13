@@ -1,17 +1,7 @@
 /**
  * OpenPGP — privileged (same-origin) webmail plugin.
  *
- * Replaces the former S/MIME pipeline with an OpenPGP pipeline that
- * runs all cryptography locally (bundled openpgp / mimetext):
- *
- * • onComposeSend   (intercept)  → build MIME via mimetext, sign/encrypt, api.jmap.sendRaw
- * • onRenderEmailBody (transform) → api.jmap.fetchBlob, decrypt/verify, replace body
- * • composer-toolbar slot         → per-message Sign / Encrypt toggles
- * • email-banner slot             → signature / encryption status
- * • settings-section slot         → key import, unlock/lock, recipient public keys
  */
-import host from '@plugin-host';
-import { listKeyRecords } from './storage.ts';
 
 import {EmailSecuBanner, EmailBanner} from './ui/banners.tsx';
 import {SettingsSection} from './ui/settings.tsx';

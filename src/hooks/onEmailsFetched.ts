@@ -1,7 +1,7 @@
 import { fetchPreviewsBatchFromBackground } from "../pgp/session-broadcast.ts";
 
 
-// Assuming your Email type looks something like this
+//Reducted interface for the email object, focusing on the properties we care about
 interface Email {
   id: string;
   preview?: string;
@@ -14,7 +14,7 @@ export async function onEmailsFetched(emails: Email[]): Promise<Email[]> {
   // Fetch the previews batch from the background
   const result: Record<string, string> = await fetchPreviewsBatchFromBackground(emailIds);
   
-  // 3. Map through emails and update the preview if it exists in the result
+  // Map through emails and update the preview if it exists in the result
   return emails.map(email => {
     if (result[email.id] !== undefined) {
       return {

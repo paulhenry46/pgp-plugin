@@ -18,22 +18,15 @@ export async function deriveAesKeyFromPgpParams(passphrase: string, salt: ArrayB
     { name: 'PBKDF2', salt, iterations, hash: 'SHA-256' },
     keyMaterial,
     { name: 'AES-GCM', length: AES_KEY_LENGTH },
-    false, // Garder la clé strictement non exportable hors de la RAM
+    false, // not extractable
     ['encrypt', 'decrypt'],
   );
 }
 
 export async function getIndex(aesKey: CryptoKey, passphrase: string, record: KeyRecord): Promise<void> {
-
-    // 2. Génération de la clé AES en utilisant la même passphrase et le même Salt
-
-    
-      // 3. Déchiffrement global de l'index et chargement en RAM
       try {
         const allEncryptedCache = await getAllMessageCache();
         const decryptedIndexMemory: Record<string, DecryptedCachePayload> = {};
-    
-        // Déchiffrement asynchrone parallélisé de tous les blocs de cache
         await Promise.all(
           allEncryptedCache.map(async (item) => {
             try {
@@ -51,7 +44,6 @@ export async function getIndex(aesKey: CryptoKey, passphrase: string, record: Ke
             }
           })
         );
-        // Injection immédiate dans la structure RAM globale du plugin
         broadcastInitializeRamIndex(decryptedIndexMemory);
     
       } catch (dbErr) {
@@ -62,9 +54,7 @@ export async function getIndex(aesKey: CryptoKey, passphrase: string, record: Ke
 
 }
 
-/**
- * Fonction utilitaire de nettoyage de texte pour générer des jetons (Tokens) uniques.
- */
+
 function tokenizeText(text: string): string[] {
   if (!text) return [];
   return text
@@ -75,27 +65,17 @@ function tokenizeText(text: string): string[] {
     .filter((word, index, self) => word.length > 2 && self.indexOf(word) === index);
 }
 
-/**
- * Indexation et persistance automatique d'un e-mail déchiffré.
- * Recherche de manière autonome la clé par défaut active pour obtenir la clé AES de session.
- *
- * @param mailId - L'identifiant unique du mail (ex: UID IMAP)
- * @param clearText - Le corps du mail en texte brut (déchiffré)
- */
 export async function indexAndPersistDecryptedMail(
   mailId: string, 
   clearText: string
 ): Promise<void> {
   try {
-    // 1. Trouver de manière autonome la clé PGP définie par défaut
     const allKeys = await listKeyRecords();
     const defaultKey = allKeys.find((k) => k.default === true);
 
     if (!defaultKey) {
       return;
     }
-
-    // 2. Récupérer la session active (et la clé AES associée) via son ID
     const sessionData = await fetchKeyFromBackground(defaultKey.id);
     
     if (!sessionData || !sessionData.aesKey) {
@@ -103,13 +83,11 @@ export async function indexAndPersistDecryptedMail(
     }
     
     const aesKey = sessionData.aesKey;
-
-    // 3. Génération de la Preview et des Tokens
     const preview = clearText.substring(0, 150).replace(/\s+/g, ' ').trim() + (clearText.length > 150 ? '...' : '');
     const tokens = tokenizeText(clearText);
 
     const decryptedPayload: DecryptedCachePayload = { preview, tokens };
-    // 4. Chiffrement AES-GCM local
+
     const textBytes = new TextEncoder().encode(JSON.stringify(decryptedPayload));
     const iv = crypto.getRandomValues(new Uint8Array(12)); // IV unique par mail
 
@@ -135,12 +113,11 @@ export async function indexAndPersistDecryptedMail(
 }
 
 export function search(query: string, index: Record<string, DecryptedCachePayload>): string[] {
-    const cleanedQuery = query.toLowerCase().trim(); // Normalisation basique
+    const cleanedQuery = query.toLowerCase().trim(); //normalize the query for case-insensitive search
         const matchingIds: string[] = [];
 
         if (cleanedQuery) {
           for (const [id, data] of Object.entries(index)) {
-            // Recherche par correspondance de jetons (Tokens)
             const matches = data.tokens.some(token => token.includes(cleanedQuery));
             if (matches) {
               matchingIds.push(id);

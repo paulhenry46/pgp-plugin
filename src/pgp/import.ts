@@ -1,11 +1,3 @@
-/**
- * OpenPGP private key import + private-key encryption-at-rest / unlock.
- * Replaces the legacy S/MIME PKCS#12 pipeline.
- *
- * Armored private keys are wrapped with AES-GCM under a PBKDF2(600k, SHA-256) key
- * derived from a user browser-passphrase. Unlocked keys are loaded natively as OpenPGP instances.
- */
-
 import * as openpgp from 'openpgp';
 import { generateUUID } from '../util.ts';
 import { extractKeyInfo } from './key-utils.ts';
@@ -33,8 +25,6 @@ interface UnlockResult {
 
 /**
  * Imports an Armored OpenPGP private key (ASCII), extracts its metadata and encrypts it at rest.
- * @param armoredPrivateKeyText - The text block "-----BEGIN PGP PRIVATE KEY BLOCK-----"
- * @param storagePassphrase - The password chosen to encrypt the key in the browser's IndexedDB storage
  */
 export async function importOpenPgpPrivateKey(
   armoredPrivateKeyText: string,

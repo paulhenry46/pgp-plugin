@@ -58,7 +58,6 @@ export function initBackgroundSessionListener(): void {
         _ramDecryptedIndex = msg.decryptedIndex;
         break;
 
-      // 2. Traitement groupé des demandes de previews depuis le webmail
       case 'REQUEST_PREVIEWS_BATCH': {
         channel.postMessage({
           type: 'RESPONSE_PREVIEWS_BATCH',
@@ -68,7 +67,6 @@ export function initBackgroundSessionListener(): void {
         break;
       }
 
-      // 3. Moteur de recherche exécuté directement côté Background RAM
       case 'REQUEST_SEARCH': {
         channel.postMessage({
           type: 'RESPONSE_SEARCH',

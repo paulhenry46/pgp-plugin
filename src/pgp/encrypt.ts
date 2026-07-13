@@ -1,19 +1,9 @@
-/**
- * OpenPGP message encryption implementation.
- * Replaces the legacy S/MIME CMS EnvelopedData generator.
- */
-
 import * as openpgp from 'openpgp';
 
 /**
  * Encrypts MIME or text content for one or more recipients.
  * Automatically includes the sender's public key (sender) to allow them
  * to read back their own messages in the "Sent" folder.
- * @param {Uint8Array} mimeBytes - The bytes of the message to encrypt.
- * @param {string[]} recipientPublicKeysArmored - List of recipient public keys (ASCII Armored format).
- * @param {string} senderPublicKeyArmored - Sender's public key (ASCII Armored format).
- * @param {boolean} useAes128 - If true, forces AES-128, otherwise uses standard AES-256.
- * @returns {Promise<Blob>} A blob containing the encrypted message in ASCII Armored format.
  */
 export async function pgpEncrypt(
   mimeBytes: Uint8Array, 

@@ -1,8 +1,3 @@
-// Minimal client for the keys.openpgp.org "VKS" HTTP API, restricted to
-// looking up keys by email and uploading new public keys.
-//
-// VKS spec: https://keys.openpgp.org/about/api
-
 const DEFAULT_BASE_URL = "https://keys.openpgp.org";
 
 export interface KeyServerOptions {

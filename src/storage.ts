@@ -1,11 +1,10 @@
 /**
  * IndexedDB persistence for the OpenPGP plugin.
  *
- * Four stores:
+ * Three stores:
  * - key-records:   encrypted-at-rest private keys + public keys (durable)
  * - public-certs:  recipient/contact public PGP keys (durable)
- * - session-keys:  unlocked OpenPGP private key objects (session-scoped)
- * - attachments:   email file attachments (durable) // only used when Atarchment + Draft are encrypted
+ * - local index:      decrypted mail previews + tokens (volatile, cleared on logout)
  */
 import host from '@plugin-host';
 import { base64ToBuffer, bufferToBase64 } from "./util.ts";
@@ -29,9 +28,9 @@ export interface KeyRecord {
   iv: ArrayBuffer;                  
   kdfIterations: number;            
   webauthn?: {
-    credentialId: ArrayBuffer;     // ID du Passkey pour le retrouver via navigator.credentials.get
-    encryptedPassphrase: ArrayBuffer; // La clé PGP chiffrée par le secret PRF
-    iv: ArrayBuffer;               // Vecteur d'initialisation propre à ce chiffrement AES-GCM
+    credentialId: ArrayBuffer;     
+    encryptedPassphrase: ArrayBuffer; 
+    iv: ArrayBuffer;               
   };          
   issuer: string;
   subject: string;
@@ -71,9 +70,9 @@ export interface SessionKeysEntry {
 }
 
 export interface EncryptedMessageCache {
-  id: string; // ID du mail (ex: UID IMAP ou Message-ID)
-  encryptedPayload: Uint8Array; // Contient le JSON { preview, tokens } chiffré en AES
-  iv: Uint8Array; // IV unique pour ce mail précis
+  id: string;
+  encryptedPayload: Uint8Array; // = { preview, tokens } AES encrypted
+  iv: Uint8Array;
 }
 
 export interface DecryptedCachePayload {
@@ -210,7 +209,7 @@ export async function getDefaultPublicKeyForEncryption(): Promise<string | undef
   return undefined;
 }
 
-// ── CRUD pour le Message Cache Chiffré ───────────────────────────────
+// ── CRUD Cache ───────────────────────────────
 
 export async function saveMessageCache(cache: EncryptedMessageCache): Promise<void> {
   const db = await openDB();
@@ -234,7 +233,6 @@ export async function getMessageCacheBatch(ids: string[]): Promise<Record<string
   
   const results: Record<string, EncryptedMessageCache> = {};
   
-  // Batch processing natif IndexedDB
   await Promise.all(
     ids.map(id => {
       return new Promise<void>((resolve) => {
@@ -243,7 +241,7 @@ export async function getMessageCacheBatch(ids: string[]): Promise<Record<string
           if (req.result) results[id] = req.result;
           resolve();
         };
-        req.onerror = () => resolve(); // On ignore silencieusement les erreurs individuelles
+        req.onerror = () => resolve();
       });
     })
   );

@@ -17,7 +17,6 @@ export function detectPgp(contentType: string, bodyStructure: any, bodyValues: a
   const noResult: PgpDetectionResult = { type: null, supported: false };
 
   // 1. Detection of PGP INLINE mode (Plain text body)
-
   if (bodyValues) {
       const { plainText, htmlText } = extractEmailContent(bodyStructure, bodyValues);
       if (plainText && htmlText) {

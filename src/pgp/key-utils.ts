@@ -44,23 +44,6 @@ export async function parsePgpKey(data: string | Uint8Array): Promise<openpgp.Pu
 // ── Metadata Extraction ──────────────────────────────────────────────
 
 /**
- * Extracts the algorithm in readable form (e.g., RSA-4096, ECC-p256...)
- * @param {openpgp.PublicKey|openpgp.PrivateKey} key 
- * @returns {string}
- */
-function extractAlgorithm(key: openpgp.PublicKey | openpgp.PrivateKey): string {
-  try {
-    const info = key.getAlgorithmInfo();
-    if (info.bits) {
-      return `${info.algorithm.toUpperCase()}-${info.bits}`;
-    }
-    return info.algorithm.toUpperCase(); // For ECC (Curve25519, p256...)
-  } catch {
-    return 'UNKNOWN';
-  }
-}
-
-/**
  * Traverses the User IDs of a key to extract all valid email addresses.
  * @param {openpgp.Key} key 
  * @returns {string[]}

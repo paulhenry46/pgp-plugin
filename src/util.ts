@@ -95,10 +95,6 @@ export function bufferToBytes(buffer: ArrayBuffer): number[] {
   return Array.from(new Uint8Array(buffer));
 }
 
-/**
- * Reconstruit un ArrayBuffer à partir d'un tableau de nombres (number[])
- * reçu depuis le pont RPC, prêt à être utilisé par WebCrypto ou stocké dans IndexedDB.
- */
 export function bytesToBuffer(bytes: number[]): ArrayBuffer {
   return new Uint8Array(bytes).buffer;
 }
@@ -113,7 +109,6 @@ export function bufferToBase64(buffer: ArrayBuffer | Uint8Array | undefined): st
   return btoa(binary);
 }
 
-// Convertit une chaîne Base64 en ArrayBuffer
 export function base64ToBuffer(base64: string | undefined): ArrayBuffer | undefined {
   if (!base64) return undefined;
   const binaryString = atob(base64);
