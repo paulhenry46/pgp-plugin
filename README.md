@@ -4,8 +4,6 @@ End-to-end PGP for Bulwark Webmail, implemented as a
 **privileged** (same-origin) plugin. All cryptography runs locally in the
 browser — no key material ever leaves the device.
 
-It use the MIME/S plugin as foundation.
-
 ## Main Features
 
 - **Core Cryptography** — Seamlessly encrypt, decrypt, sign, and verify emails locally using OpenPGP engine.
@@ -15,6 +13,9 @@ It use the MIME/S plugin as foundation.
 - **Automated Key Exchange** — Automatically detects and imports public keys attached to incoming signed emails, making recipient keyring management effortless.
 - **Keyserver Integration** — Seamlessly publish your public key to or fetch recipient keys from keys.openpgp.org directly within the interface.
 - **WebAuthn** —  Don't want to type your passphrase every time you go to client ? Just use the webauthn feature. Unlock your keys with one click ! Your key need to support PRF.
+- **Public Key Attachment** — There is an option to automatically send as an attachment the public key corresponding to your adress.
+- **Import / Export** — You can import and exports the local search/preview index and your keys.
+- 
 
 
 ## Security model

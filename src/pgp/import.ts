@@ -155,15 +155,15 @@ export async function unlockPrivateKey(record: KeyRecord, passphrase: string): P
       throw new Error(`Failed to decrypt internal OpenPGP packets: ${err.message}`);
     }
   }
-  if(record.default === true){
-      const aesKey = await deriveAesKeyFromPgpParams(passphrase, record.salt, record.kdfIterations);
+  if(record.default === true && record.aesSalt){
+      const aesKey = await deriveAesKeyFromPgpParams(passphrase, record.aesSalt, record.kdfIterations);
       await getIndex(aesKey, passphrase, record);
 
       return {
     unlockedPrivateKey: openPgpPrivateKey.armor(),
     signingKey: openPgpPrivateKey.armor(),
     decryptionKey: openPgpPrivateKey.armor(),
-    aesKey // Retourné pour le composant UI et le Broadcast
+    aesKey
     };
 
   }else{
@@ -222,4 +222,3 @@ async function encryptPrivateKeyData(pkcs8Bytes: ArrayBuffer, passphrase: string
   const encrypted = await crypto.subtle.encrypt({ name: 'AES-GCM', iv }, wrappingKey, pkcs8Bytes);
   return { encrypted, salt, iv };
 }
-

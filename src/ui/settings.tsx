@@ -22,7 +22,7 @@ import {
 } from '../pgp/session-broadcast.ts';
 import { uploadKey, requestVerify, lookup } from '../pgp/server.ts';
 import { deriveAesKeyFromPgpParams, getIndex } from '../cache.ts';
-import { bufferToBytes, bytesToBuffer } from '../util.ts';
+import { bufferToBytes, bytesToBuffer, generateSalt } from '../util.ts';
 
 export function SettingsSection() {
   const [keys, setKeys] = useState<KeyRecord[]>([]);
@@ -341,31 +341,38 @@ export function SettingsSection() {
   }
 
   async function handleSetDefaultPrivateKey(targetKey: KeyRecord, isChecked: boolean) {
-    setBusy(true);
-    try {
-      await Promise.all(
-        keys.map((k) => {
-          const isCurrent = k.id === targetKey.id;
-          return saveKeyRecord({
-            ...k,
-            default: isCurrent ? isChecked : (isChecked ? false : k.default)
-          });
-        })
-      );
-      
-      host.toast.success(
-        isChecked 
-          ? host.i18n.t('settings.success.default_key_set', { email: targetKey.email }) 
-          : host.i18n.t('settings.success.default_key_removed')
-      );
-      await refresh();
-    } catch (err) {
-      const error = err as Error;
-      host.toast.error(host.i18n.t('settings.error.generic', { message: error?.message ? error.message : String(err) }));
-    } finally {
-      setBusy(false);
-    }
+  setBusy(true);
+  try {
+    await Promise.all(
+      keys.map(async (k) => {
+        const isCurrent = k.id === targetKey.id;
+        
+        const updatedKey = {
+          ...k,
+          default: isCurrent ? isChecked : (isChecked ? false : k.default)
+        };
+
+        if (isCurrent && isChecked && !k.aesSalt) {
+          updatedKey.aesSalt = generateSalt();
+        }
+
+        return saveKeyRecord(updatedKey);
+      })
+    );
+    
+    host.toast.success(
+      isChecked 
+        ? host.i18n.t('settings.success.default_key_set', { email: targetKey.email }) 
+        : host.i18n.t('settings.success.default_key_removed')
+    );
+    await refresh();
+  } catch (err) {
+    const error = err as Error;
+    host.toast.error(host.i18n.t('settings.error.generic', { message: error?.message ? error.message : String(err) }));
+  } finally {
+    setBusy(false);
   }
+}
 
   async function handleExportJSON() {
     setBusy(true);

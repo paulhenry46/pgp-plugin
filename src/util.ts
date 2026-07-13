@@ -141,3 +141,7 @@ export async function unlockedDecryptMaps() {
   }
   return { keyRecords: recs, unlockedKeys };
 }
+
+export function generateSalt() : ArrayBuffer{
+  return crypto.getRandomValues(new Uint8Array(32)).buffer as ArrayBuffer;
+}

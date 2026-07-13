@@ -45,6 +45,7 @@ export interface KeyRecord {
     canEncrypt: boolean;
   };
   default?: boolean;
+  aesSalt?: ArrayBuffer;
 }
 
 export interface PublicCert {
