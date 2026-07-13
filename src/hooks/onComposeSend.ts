@@ -5,13 +5,13 @@ import * as openpgp from 'openpgp';
 import { buildMimeMessage, wrapAsPgpMimeEncrypted, wrapAsPgpMimeSigned } from '../mime/builder.ts';
 import { pgpSignDetached } from '../pgp/pgp-sign.ts';
 import { pgpEncrypt } from '../pgp/encrypt.ts';
-import { clearArmoredPrivateKeyToPrivateKey, recipientKeysFor, signingKeyRecordForEmail } from '../util.ts';
+import { clearArmoredPrivateKeyToPrivateKey, getAvailableKeyId, recipientKeysFor, signingKeyRecordForEmail } from '../util.ts';
 import { KeyRecord } from '../storage.ts';
 
 import {emailsOf, blobToBytes, bytesArrayBuffer} from '../util.ts';
 import { INTENT_KEY, settings} from '../shared.ts';
 import { isCapable } from '../index.tsx';
-import { fetchKeyFromBackground } from '../pgp/session-broadcast.ts';
+import { executeCryptText } from '../pgp/session-broadcast.ts';
 
 
 export interface ComposeAttachment {
@@ -78,6 +78,11 @@ async function fetchAttachments(req: ComposeRequest) {
   return out;
 }
     
+
+
+
+// (Conserve tes autres helpers existants comme resolveIntent, fetchAttachments, etc.)
+
 export async function onComposeSend(req: ComposeRequest): Promise<boolean | undefined> {
   console.log(req);
   if (!req || typeof req !== 'object') return undefined;
@@ -85,7 +90,7 @@ export async function onComposeSend(req: ComposeRequest): Promise<boolean | unde
   const { sign, encrypt } = await resolveIntent(req);
   console.log('sign:', sign, 'encrypt:', encrypt);
   if (!sign && !encrypt) return undefined;
-  console.log('on continue');
+  
   if (!(await isCapable())) {
     host.toast.error(host.i18n.t('error.not_privileged_tier'));
     return false;
@@ -93,31 +98,27 @@ export async function onComposeSend(req: ComposeRequest): Promise<boolean | unde
 
   try {
     const identityId = req.identityId || req.identity || '';
-
     if (!identityId) throw new Error(host.i18n.t('error.no_identity'));
 
-    const from = {addr: req.fromEmail, name: req.fromName};
-
+    const from = { addr: req.fromEmail, name: req.fromName };
     if (!from.addr) throw new Error(host.i18n.t('error.no_sender_address'));
+    
     const allRecipientEmails = [...emailsOf(req.to), ...emailsOf(req.cc), ...emailsOf(req.bcc)];
 
-    console.log('from:' ,req.fromEmail, from.addr);
-    let keyRecord: KeyRecord | undefined = undefined;
-    if (sign || encrypt) {
-      keyRecord = await signingKeyRecordForEmail(from.addr);
-    }
-
-    if ((sign || encrypt) && !keyRecord) {
+    // Récupération sécurisée de l'ID de la clé (sans récupérer la clé privée)
+    const keyId = await getAvailableKeyId(from.addr);
+    if (!keyId) {
       host.toast.error(`${host.i18n.t('error.no_key_for_email_prefix')}${from.addr}${host.i18n.t('error.no_key_for_email_suffix')}`);
       return false;
     }
 
-    // 1. Generate the clear MIME structure (with mimetext)
+    // 1. Génération de la structure MIME en clair (avec mimetext)
     const attachments = await fetchAttachments(req);
-    console.log('build Message')
+    console.log('build Message');
+    
     const clearMimeBytes = buildMimeMessage({
       from,
-      to :req.to,
+      to: req.to,
       cc: req.cc,
       subject: req.subject || '',
       textBody: req.textBody || req.text || '',
@@ -127,15 +128,13 @@ export async function onComposeSend(req: ComposeRequest): Promise<boolean | unde
       attachments,
     });
 
+    const clearMimeString = new TextDecoder().decode(clearMimeBytes);
     let finalEnvelopeBlob: Blob | undefined;
     console.log('builded Message');
-    
-    const currentKeyRecord = keyRecord as KeyRecord;
-    const session = await fetchKeyFromBackground(currentKeyRecord.id);
 
-    // 2. Process cryptographic combinations (Sign, Encrypt, or Sign+Encrypt)
+    // 2. Traitement des combinaisons cryptographiques (Sign, Encrypt, ou Sign+Encrypt) via la Boîte Noire
     if (encrypt) {
-      console.log('encrypt Message');
+      console.log('encrypt Message via Background');
       const { found, missing } = await recipientKeysFor(allRecipientEmails);
       console.log('RecipientKey :', found);
       if (missing.length > 0) {
@@ -143,42 +142,40 @@ export async function onComposeSend(req: ComposeRequest): Promise<boolean | unde
         return false;
       }
 
-      // Resolve the signing key if required
-      let signingKeyForEncrypt: openpgp.PrivateKey | undefined = undefined;
-      if (sign) {
-        console.log('preparing native signing key for combined encryption');
-        if (!session || !session.signingKey) {
-          host.toast.error(host.i18n.t('error.key_locked'));
-          return false;
-        }
-        signingKeyForEncrypt = await clearArmoredPrivateKeyToPrivateKey(session.signingKey);
+      // Le chiffrement complet (avec signature intégrée si sign est vrai) est délégué au Background.
+      // Note : Si ton Background gère la signature combinée, passe l'information dans l'action ou l'objet.
+      const actionType = sign ? 'encrypt-and-sign' : 'encrypt'; 
+      const encryptedString = await executeCryptText(actionType as any, clearMimeString, keyId);
+
+      if (!encryptedString) {
+        host.toast.error(host.i18n.t('error.key_locked_or_crypto_failed'));
+        return false;
       }
 
-      // Full encryption (combined with signing if sign is true)
-      const encryptedBlob = await pgpEncrypt(
-        clearMimeBytes, 
-        found, 
-        currentKeyRecord.publicKey,
-        signingKeyForEncrypt
-      );
+      const encryptedBlob = new Blob([new TextEncoder().encode(encryptedString)], { type: 'application/octet-stream' });
       
-      // Wrap in the strict PGP/MIME multipart/encrypted standard (RFC 3156)
-      finalEnvelopeBlob =  wrapAsPgpMimeEncrypted(encryptedBlob, {
+      // Emballage dans le standard PGP/MIME multipart/encrypted (RFC 3156)
+      finalEnvelopeBlob = wrapAsPgpMimeEncrypted(encryptedBlob, {
         from, to: req.to, cc: req.cc, subject: req.subject || '', inReplyTo: req.inReplyTo, references: req.references, messageId: req.messageId
       });
       console.log('finalEnvelopeBlob', finalEnvelopeBlob);
+
     } else if (sign) {
-      console.log('sign Message')
-      // Case: Signature only (detached multipart/signed)
-      if (!session || !session.signingKey) {
-        host.toast.error(host.i18n.t('error.key_locked'));
+      console.log('sign Message via Background');
+      
+      // Demande de signature détachée au Background
+      // Si tu utilises executeCryptText pour la signature, assure-toi que ton Background intercepte l'action 'sign'
+      const signatureString = await executeCryptText('sign' as any, clearMimeString, keyId);
+      
+      if (!signatureString) {
+        host.toast.error(host.i18n.t('error.key_locked_or_crypto_failed'));
         return false;
       }
-      const signatureBlob = await pgpSignDetached(clearMimeBytes, await clearArmoredPrivateKeyToPrivateKey(session.signingKey));
-      
-      // Convert clearMimeBytes to a blob
+
+      const signatureBlob = new Blob([new TextEncoder().encode(signatureString)], { type: 'application/pgp-signature' });
       const clearMimeBytesBlob = new Blob([clearMimeBytes.slice().buffer], { type: 'application/octet-stream' });
 
+      // Emballage dans le standard PGP/MIME multipart/signed
       finalEnvelopeBlob = wrapAsPgpMimeSigned(clearMimeBytesBlob, signatureBlob, {
         from, to: req.to, cc: req.cc, subject: req.subject || '', inReplyTo: req.inReplyTo, references: req.references, messageId: req.messageId
       });
@@ -187,10 +184,7 @@ export async function onComposeSend(req: ComposeRequest): Promise<boolean | unde
     if (!finalEnvelopeBlob) {
       throw new Error(host.i18n.t('error.cryptographic_failed'));
     }
-    console.log('finalEnvelopeBlob', finalEnvelopeBlob);
 
-    const final_text = await finalEnvelopeBlob.text();
-    console.log('final text: ', final_text);
     const rawBytes = await blobToBytes(finalEnvelopeBlob);
     const envelopeRecipients = [...new Set([...allRecipientEmails])];
     console.log('Sending raw bytes to JMAP:', rawBytes, 'Recipients:', envelopeRecipients);

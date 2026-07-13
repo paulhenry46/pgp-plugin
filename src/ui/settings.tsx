@@ -1,5 +1,5 @@
 import host from '@plugin-host';
-import React from 'react'
+import React from 'react';
 const h = React.createElement;
 const { useState, useEffect, useCallback, useRef } = React;
 import {
@@ -12,8 +12,7 @@ import { btn, fmtDate, isExpired, card } from './shared.ts';
 import { isCapable, NOT_PRIVILEGED_MSG } from '../index.tsx';
 
 import { 
-  fetchKeyFromBackground, 
-  broadcastUnlockKey, 
+  checkKeyStatusFromBackground, 
   broadcastLockKey,
   subscribeToKeyUpdates
 } from '../pgp/session-broadcast.ts';
@@ -35,9 +34,11 @@ export function SettingsSection() {
     const [k, c] = await Promise.all([listKeyRecords(), listPublicCerts()]);
     setKeys(k); setCerts(c);
     
+    // Vérification du statut déverrouillé via le Background (sans fuite de RAM)
     const u: Record<string, boolean> = {};
     for (const rec of k) {
-      u[rec.id] = !!(await fetchKeyFromBackground(rec.id));
+      // checkKeyStatusFromBackground renvoie un booléen
+      u[rec.id] = await checkKeyStatusFromBackground(rec.id);
     }
     setUnlocked(u);
   }, []);
@@ -61,7 +62,6 @@ export function SettingsSection() {
     const file = fileRef.current && fileRef.current.files && fileRef.current.files[0];
     if (!file) return;
 
-    // Use host.ui.prompt to gather both the active key passphrase and an optional new storage passphrase
     const result = await host.ui.prompt({
       title: host.i18n.t('prompt.import_private_key.title'),
       message: host.i18n.t('prompt.import_private_key.message'),
@@ -124,15 +124,9 @@ export function SettingsSection() {
 
     setBusy(true);
     try {
-      const { unlockedPrivateKey, signingKey, decryptionKey, aesKey } = await unlockPrivateKey(rec, result.passphrase);
-      
-      broadcastUnlockKey({ 
-        id: rec.id, 
-        unlockedPrivateKey, 
-        signingKey, 
-        decryptionKey ,
-        aesKey: aesKey,
-      });
+      // Appel de la méthode "Boîte Noire" : le déverrouillage et la transmission 
+      // au background se font de manière encapsulée à l'intérieur d'unlockPrivateKey.
+      await unlockPrivateKey(rec, result.passphrase);
       
       host.toast.success(`Unlocked ${rec.email || 'key'}`);
       await refresh();

@@ -1,7 +1,6 @@
 import * as openpgp from 'openpgp';
 import host from '@plugin-host';
-import { getSessionKeys, KeyRecord, listKeyRecords, listPublicCerts } from './storage.ts';
-import { fetchKeyFromBackground, getBackgroundSessionKey } from './pgp/session-broadcast.ts';
+import { KeyRecord, listKeyRecords, listPublicCerts } from './storage.ts';
 // Small browser helpers shared across the S/MIME plugin modules.
 // (The native app pulled these from @/lib/utils; the sandbox has no host
 // imports, so we provide local, dependency-free equivalents.)
@@ -166,15 +165,12 @@ export async function recipientKeysFor(emails:any) {
   return { found, missing };
 }
 
-// Build the map of unlocked private keys from the session store.
-export async function unlockedDecryptMaps() {
+export async function getAvailableKeyId(email?: string): Promise<string> {
   const recs = await listKeyRecords();
-  const unlockedKeys = new Map();
-  for (const r of recs) {
-    const s = await fetchKeyFromBackground(r.id);
-    if (!s) continue;
-    // OpenPGP unifies the decryption key (no legacy key needed anymore)
-    if (s.unlockedPrivateKey) unlockedKeys.set(r.id, s.unlockedPrivateKey);
+  if (email) {
+    const lower = email.toLowerCase();
+    const match = recs.find((r) => r.email === lower);
+    if (match) return match.id;
   }
-  return { keyRecords: recs, unlockedKeys };
+  return recs[0]?.id || '';
 }

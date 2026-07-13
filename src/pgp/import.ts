@@ -1,9 +1,6 @@
 /**
  * OpenPGP private key import + private-key encryption-at-rest / unlock.
- * Replaces the legacy S/MIME PKCS#12 pipeline.
- *
- * Armored private keys are wrapped with AES-GCM under a PBKDF2(600k, SHA-256) key
- * derived from a user browser-passphrase. Unlocked keys are loaded natively as OpenPGP instances.
+ * Architecture en Boîte Noire (RAM Isolation).
  */
 
 import * as openpgp from 'openpgp';
@@ -11,8 +8,7 @@ import { generateUUID } from '../util.ts';
 import { extractKeyInfo } from './key-utils.ts';
 import { KeyRecord, listPublicCerts, savePublicCert } from '../storage.ts';
 import { KDF_ITERATIONS, AES_KEY_LENGTH } from '../shared.ts';
-import { deriveAesKeyFromPgpParams, getIndex } from '../cache.ts';
-
+import { broadcastUnlockKey } from './session-broadcast.ts';
 
 // ── Definitions & Interfaces ──────────────────────────────────────────
 
@@ -22,19 +18,10 @@ interface EncryptedData {
   iv: ArrayBuffer;
 }
 
-interface UnlockResult {
-  unlockedPrivateKey: string;
-  signingKey: string;
-  decryptionKey: string;
-  aesKey: CryptoKey;
-}
-
 // ── Main Core Functions ───────────────────────────────────────────────
 
 /**
- * Imports an Armored OpenPGP private key (ASCII), extracts its metadata and encrypts it at rest.
- * @param armoredPrivateKeyText - The text block "-----BEGIN PGP PRIVATE KEY BLOCK-----"
- * @param storagePassphrase - The password chosen to encrypt the key in the browser's IndexedDB storage
+ * Importe une clé privée OpenPGP blindée (ASCII), extrait ses métadonnées et la chiffre pour le stockage au repos.
  */
 export async function importOpenPgpPrivateKey(
   armoredPrivateKeyText: string,
@@ -45,7 +32,7 @@ export async function importOpenPgpPrivateKey(
     throw new Error('Invalid OpenPGP private key: text block required');
   }
 
-  // 1. Parse & Decrypt
+  // 1. Analyse et validation de la clé
   let privateKey: openpgp.Key;
   try {
     privateKey = await openpgp.readKey({ armoredKey: armoredPrivateKeyText });
@@ -66,18 +53,18 @@ export async function importOpenPgpPrivateKey(
     throw new Error(`OpenPGP key validation failed: ${err.message}`);
   }
 
-  // 2. Extract metadata
+  // 2. Extraction des métadonnées
   const keyInfo = (await extractKeyInfo(privateKey)) as any;
   const email = (keyInfo.emailAddresses?.[0] ?? '').toLowerCase();
   if (!email) {
     throw new Error('OpenPGP private key must be bound to at least one valid email User ID');
   }
 
-  // 3. Encrypt private key for at-rest storage
+  // 3. Chiffrement AES-GCM local de la clé brute pour stockage IndexedDB
   const textBytes = new TextEncoder().encode(armoredPrivateKeyText);
   const { encrypted, salt, iv } = await encryptPrivateKeyData(textBytes.buffer, storagePassphrase);
 
-  // 4. Generate KeyRecord
+  // 4. Génération de l'enregistrement KeyRecord
   const keyRecord: KeyRecord = {
     id: generateUUID(),
     email,
@@ -122,75 +109,55 @@ export async function importOpenPgpPrivateKey(
 }
 
 /**
- * Decrypts the private key stored at rest and returns unlocked openpgp.PrivateKey instances.
- * @param record - The keyRecord extracted from IndexedDB
- * @param passphrase - The storage password defined by the user
+ * Déverrouille la clé privée en déléguant l'opération au Background script (Boîte Noire).
+ * Aucune donnée sensible ou clé AES brute ne transite vers le thread de l'Iframe/UI.
  */
-export async function unlockPrivateKey(record: KeyRecord, passphrase: string): Promise<UnlockResult> {
-  // 1. Dérivation de la clé de déballage pour la clé PGP
-  const wrappingKey = await deriveWrappingKey(passphrase, record.salt, record.kdfIterations);
-
-  let rawTextBytes: ArrayBuffer;
+/**
+ * Déverrouille la clé privée en déléguant l'opération au Background script (Boîte Noire).
+ */
+export async function unlockPrivateKey(record: KeyRecord, passphrase: string): Promise<boolean> {
   try {
-    rawTextBytes = await crypto.subtle.decrypt(
-      { name: 'AES-GCM', iv: record.iv },
-      wrappingKey,
-      record.encryptedPrivateKey
-    );
-  } catch {
-    throw new Error('Incorrect passphrase');
+    // On notifie le Background de charger et déverrouiller la clé en RAM isolée
+    await broadcastUnlockKey({
+      id: record.id,
+      encryptedPrivateKey: record.encryptedPrivateKey,
+      salt: record.salt,
+      iv: record.iv,
+      kdfIterations: record.kdfIterations,
+      passphrase
+    });
+
+    // Si la fonction broadcastUnlockKey ne lève pas d'erreur, on considère l'action initiée.
+    return true;
+  } catch (err) {
+    console.error('[Import] Échec lors de la transmission du déverrouillage :', err);
+    throw new Error('Incorrect passphrase or background communication failed');
   }
-
-  const armoredPrivateKeyText = new TextDecoder().decode(rawTextBytes);
-  const parsedKey = await openpgp.readKey({ armoredKey: armoredPrivateKeyText });
-  let openPgpPrivateKey = parsedKey as openpgp.PrivateKey;
-
-  if (!openPgpPrivateKey.isDecrypted()) {
-    try {
-      openPgpPrivateKey = await openpgp.decryptKey({
-        privateKey: openPgpPrivateKey,
-        passphrase
-      });
-    } catch (err: any) {
-      throw new Error(`Failed to decrypt internal OpenPGP packets: ${err.message}`);
-    }
-  }
-  const aesKey = await deriveAesKeyFromPgpParams(passphrase, record.salt, record.kdfIterations);
-  await getIndex(aesKey, passphrase, record);
-
-  return {
-    unlockedPrivateKey: openPgpPrivateKey.armor(),
-    signingKey: openPgpPrivateKey.armor(),
-    decryptionKey: openPgpPrivateKey.armor(),
-    aesKey // Retourné pour le composant UI et le Broadcast
-  };
 }
 
-export async function importOpenPgpPublicKey(armoredPublicKeyText: string): Promise<any> {
-
-        const readKey = await openpgp.readKey({ armoredKey: armoredPublicKeyText });
-        const info = await extractKeyInfo(readKey);
-        
-        const email = (info.emailAddresses[0] || '').toLowerCase();
-        if (!email) throw new Error('Key has no valid email address associated');
-        
-        const existing = (await listPublicCerts()).some((c) => c.fingerprint === info.fingerprint);
-          if (!existing) {
-              
-        await savePublicCert({
-          id: generateUUID(),
-          email,
-          publicKey: armoredPublicKeyText,
-          issuer: info.issuer,
-          subject: info.subject,
-          notBefore: info.notBefore,
-          notAfter: info.notAfter,
-          fingerprint: info.fingerprint,
-          source: 'manual',
-        });
-      }
-        return email;
-      }
+export async function importOpenPgpPublicKey(armoredPublicKeyText: string): Promise<string> {
+  const readKey = await openpgp.readKey({ armoredKey: armoredPublicKeyText });
+  const info = await extractKeyInfo(readKey);
+  
+  const email = (info.emailAddresses[0] || '').toLowerCase();
+  if (!email) throw new Error('Key has no valid email address associated');
+  
+  const existing = (await listPublicCerts()).some((c) => c.fingerprint === info.fingerprint);
+  if (!existing) {
+    await savePublicCert({
+      id: generateUUID(),
+      email,
+      publicKey: armoredPublicKeyText,
+      issuer: info.issuer,
+      subject: info.subject,
+      notBefore: info.notBefore,
+      notAfter: info.notAfter,
+      fingerprint: info.fingerprint,
+      source: 'manual',
+    });
+  }
+  return email;
+}
 
 // ── Private key encryption / decryption ──────────────────────────────
 
@@ -213,4 +180,3 @@ async function encryptPrivateKeyData(pkcs8Bytes: ArrayBuffer, passphrase: string
   const encrypted = await crypto.subtle.encrypt({ name: 'AES-GCM', iv }, wrappingKey, pkcs8Bytes);
   return { encrypted, salt, iv };
 }
-

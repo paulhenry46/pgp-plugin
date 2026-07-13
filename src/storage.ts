@@ -1,19 +1,13 @@
 /**
  * IndexedDB persistence for the OpenPGP plugin.
- *
- * Four stores:
- * - key-records:   encrypted-at-rest private keys + public keys (durable)
- * - public-certs:  recipient/contact public PGP keys (durable)
- * - session-keys:  unlocked OpenPGP private key objects (session-scoped)
- * - attachments:   email file attachments (durable) // only used when Atarchment + Draft are encrypted
+ * Architecture en Boîte Noire (RAM Isolation).
  */
 
 const DB_NAME = 'pgp-plugin-store';
 const DB_VERSION = 3;
 const KEY_RECORDS_STORE = 'key-records';
 const PUBLIC_CERTS_STORE = 'public-certs';
-const SESSION_KEYS_STORE = 'session-keys';
-const MESSAGE_CACHE_STORE = 'message-cache';
+const MESSAGE_CACHE_STORE = 'message-cache'; // Suppression de SESSION_KEYS_STORE inutile à l'UI
 
 // ── Interfaces ──────────────────────────────────────
 
@@ -54,18 +48,10 @@ export interface PublicCert {
   default?: boolean;
 }
 
-export interface SessionKeysEntry {
-  id: string; 
-  unlockedPrivateKey: string; // ASCII Armored
-  signingKey: string;          // ASCII Armored
-  decryptionKey: string;       // ASCII Armored
-  aesKey: CryptoKey;
-}
-
 export interface EncryptedMessageCache {
-  id: string; // ID du mail (ex: UID IMAP ou Message-ID)
-  encryptedPayload: Uint8Array; // Contient le JSON { preview, tokens } chiffré en AES
-  iv: Uint8Array; // IV unique pour ce mail précis
+  id: string; 
+  encryptedPayload: Uint8Array; 
+  iv: Uint8Array; 
 }
 
 export interface DecryptedCachePayload {
@@ -92,9 +78,6 @@ function openDB(): Promise<IDBDatabase> {
         certStore.createIndex('email', 'email', { unique: false });
         certStore.createIndex('accountId', 'accountId', { unique: false });
       }
-      if (!db.objectStoreNames.contains(SESSION_KEYS_STORE)) {
-        db.createObjectStore(SESSION_KEYS_STORE, { keyPath: 'id' });
-      }
       if (!db.objectStoreNames.contains(MESSAGE_CACHE_STORE)) {
         db.createObjectStore(MESSAGE_CACHE_STORE, { keyPath: 'id' });
       }
@@ -105,9 +88,6 @@ function openDB(): Promise<IDBDatabase> {
   });
 }
 
-/**
- * Encapsulate operation in promise.
- */
 function txPromise<T>(
   db: IDBDatabase, 
   storeName: string, 
@@ -143,10 +123,9 @@ export async function listKeyRecords(accountId?: string): Promise<KeyRecord[]> {
   return all.filter((r) => r.accountId === accountId || !r.accountId);
 }
 
-export async function getDefaultKeyRecord(): Promise<KeyRecord |undefined>{
+export async function getDefaultKeyRecord(): Promise<KeyRecord | undefined> {
   const db = await openDB();
   const all = await txPromise<KeyRecord[]>(db, KEY_RECORDS_STORE, 'readonly', (s) => s.getAll());
-
   return all.find((r) => r.default === true);
 }
 
@@ -226,7 +205,6 @@ export async function getMessageCacheBatch(ids: string[]): Promise<Record<string
   
   const results: Record<string, EncryptedMessageCache> = {};
   
-  // Batch processing natif IndexedDB
   await Promise.all(
     ids.map(id => {
       return new Promise<void>((resolve) => {
@@ -235,7 +213,7 @@ export async function getMessageCacheBatch(ids: string[]): Promise<Record<string
           if (req.result) results[id] = req.result;
           resolve();
         };
-        req.onerror = () => resolve(); // On ignore silencieusement les erreurs individuelles
+        req.onerror = () => resolve(); 
       });
     })
   );
