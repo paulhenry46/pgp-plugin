@@ -1,6 +1,6 @@
 {
-  "id": "openpgp",
-  "name": "OPENPGP",
+  "id": "PGPTE2E",
+  "name": "PGP True End-to-End",
   "version": "1.0.1",
   "author": "Paulhenry Saux & Community",
   "description": "End-to-end OpenPGP for webmail: sign and encrypt outgoing messages, and automatically verify signatures and decrypt incoming PGP mail. Private keys are encrypted at rest with a passphrase, and unlocked into non-extractable WebCrypto keys that never leave your browser. Runs in the privileged (same-origin) plugin tier so all cryptography happens locally.",
@@ -48,12 +48,6 @@
       "type": "boolean",
       "label": "Ask for the passphrase when booting the app.",
       "description": "Ask for the passphrase decrypting your default key when booting the app. Avoid to go to settings to manually unlock your key.",
-      "default": true
-    },
-    "lockOnLogout": {
-      "type": "boolean",
-      "label": "Lock keys on logout",
-      "description": "Wipe all unlocked private keys from memory when you sign out or switch accounts. Leave on unless you have a specific reason not to.",
       "default": true
     },
     "alwaysSendPubKey": {
