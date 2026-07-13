@@ -56,6 +56,12 @@
       "description": "Wipe all unlocked private keys from memory when you sign out or switch accounts. Leave on unless you have a specific reason not to.",
       "default": true
     },
+    "alwaysSendPubKey": {
+      "type": "boolean",
+      "label": "Always send public key",
+      "description": "Send your public key along with each encrypted message.",
+      "default": true
+    },
     "defaultEncrypt": {
       "type": "boolean",
       "label": "Default encrypt",

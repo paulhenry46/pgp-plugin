@@ -46,6 +46,7 @@ declare module '@plugin-host' {
       lockOnLogout?: boolean;
       encryptDrafts?: boolean;
       askForDefaultKeyPassOnActivated?: boolean;
+      alwaysSendPubKey?: boolean;
     };
   } | undefined;
 }

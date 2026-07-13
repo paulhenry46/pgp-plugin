@@ -139,8 +139,18 @@ export async function onComposeSend(req: ComposeRequest): Promise<boolean | unde
       return false;
     }
 
+
+
     // 1. Generate the clear MIME structure (with mimetext)
     const attachments = await fetchAttachments(req);
+    if(settings().alwaysSendPubKey) {
+      attachments.push({
+        filename: `${from.addr}_publickey.asc`,
+        contentType: 'application/pgp-keys',
+        content: new TextEncoder().encode(keyRecord?.publicKey || ''),
+      });
+    }
+
     console.log('build Message')
     const clearMimeBytes = buildMimeMessage({
       from,
