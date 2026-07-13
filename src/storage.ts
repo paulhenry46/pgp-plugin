@@ -26,6 +26,11 @@ export interface KeyRecord {
   salt: ArrayBuffer;                
   iv: ArrayBuffer;                  
   kdfIterations: number;            
+  webauthn?: {
+    credentialId: ArrayBuffer;     // ID du Passkey pour le retrouver via navigator.credentials.get
+    encryptedPassphrase: ArrayBuffer; // La clé PGP chiffrée par le secret PRF
+    iv: ArrayBuffer;               // Vecteur d'initialisation propre à ce chiffrement AES-GCM
+  };          
   issuer: string;
   subject: string;
   serialNumber: string;             
@@ -59,7 +64,7 @@ export interface SessionKeysEntry {
   unlockedPrivateKey: string; // ASCII Armored
   signingKey: string;          // ASCII Armored
   decryptionKey: string;       // ASCII Armored
-  aesKey: CryptoKey;
+  aesKey?: CryptoKey;
 }
 
 export interface EncryptedMessageCache {

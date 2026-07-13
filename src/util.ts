@@ -1,7 +1,7 @@
 import * as openpgp from 'openpgp';
 import host from '@plugin-host';
-import { getSessionKeys, KeyRecord, listKeyRecords, listPublicCerts } from './storage.ts';
-import { fetchKeyFromBackground, getBackgroundSessionKey } from './pgp/session-broadcast.ts';
+import {  KeyRecord, listKeyRecords, listPublicCerts } from './storage.ts';
+import { fetchKeyFromBackground } from './pgp/session-broadcast.ts';
 // Small browser helpers shared across the S/MIME plugin modules.
 // (The native app pulled these from @/lib/utils; the sandbox has no host
 // imports, so we provide local, dependency-free equivalents.)

@@ -1,5 +1,7 @@
 import host from '@plugin-host';
 import React from 'react'
+import * as openpgp from 'openpgp';
+
 const h = React.createElement;
 const { useState, useEffect, useCallback, useRef } = React;
 import {
@@ -10,6 +12,8 @@ import {
 import { importOpenPgpPrivateKey, importOpenPgpPublicKey, unlockPrivateKey } from '../pgp/import.ts';
 import { btn, fmtDate, isExpired, card } from './shared.ts';
 import { isCapable, NOT_PRIVILEGED_MSG } from '../index.tsx';
+import { registerWebAuthnPRF, getWebAuthnPRF } from '../webauthn/index.ts';
+import { encryptPassphraseWithWebAuthn, decryptPassphraseWithWebAuthn } from '../webauthn/settings.ts';
 
 import { 
   fetchKeyFromBackground, 
@@ -18,6 +22,7 @@ import {
   subscribeToKeyUpdates
 } from '../pgp/session-broadcast.ts';
 import { uploadKey, requestVerify, lookup } from '../pgp/server.ts';
+import { deriveAesKeyFromPgpParams, getIndex } from '../cache.ts';
 
 export function SettingsSection() {
   const [keys, setKeys] = useState<KeyRecord[]>([]);
@@ -105,6 +110,98 @@ export function SettingsSection() {
       setBusy(false);
     }
   }
+
+  // 1. Liaison d'une clé existante à WebAuthn (Bouton d'enrôlement)
+  async function handleLinkWebAuthn(rec: KeyRecord) {
+  let passphrase = "";
+
+  // 1. On récupère la passphrase. Idéalement via une invite utilisateur pour être sûr de l'avoir
+  const result = await host.ui.prompt({
+    title: "Activer WebAuthn",
+    message: `Veuillez saisir la passphrase de votre clé pour lier votre empreinte/Bitwarden.`,
+    fields: [{ name: 'passphrase', label: 'Passphrase actuelle', type: 'password', required: true }]
+  });
+  
+  if (!result || !result.passphrase) return;
+  passphrase = result.passphrase;
+
+  // Optionnel : Valider rapidement que la passphrase est la bonne avant d'aller plus loin
+  try {
+    await unlockPrivateKey(rec, passphrase);
+  } catch {
+    host.toast.error("Passphrase incorrecte. Liaison annulée.");
+    return;
+  }
+
+  setBusy(true);
+  try {
+    // 2. Déclenche l'enregistrement Passkey (Bitwarden / TouchID)
+    const { credentialId, prfSecret } = await registerWebAuthnPRF(rec.email || "user@pgp");
+    
+    // 3. Chiffre la VRAIE passphrase avec le secret WebAuthn
+    const { ciphertext, iv } = await encryptPassphraseWithWebAuthn(passphrase, prfSecret);
+
+    // 4. Sauvegarde dans IndexedDB
+    await saveKeyRecord({
+      ...rec,
+      webauthn: {
+        credentialId,
+        encryptedPassphrase: ciphertext,
+        iv: iv.buffer.slice(0) as ArrayBuffer
+      }
+    });
+
+    host.toast.success("Authentification biométrique activée !");
+    await refresh();
+  } catch (err) {
+    const error = err as Error;
+    host.toast.error(`Échec WebAuthn : ${error?.message || String(err)}`);
+  } finally {
+    setBusy(false);
+  }
+}
+
+  async function handleUnlockAllWithWebAuthn() {
+  const webauthnKeys = keys.filter(k => k.webauthn && !unlocked[k.id]);
+  if (webauthnKeys.length === 0) return;
+
+  setBusy(true);
+  try {
+    for (const rec of webauthnKeys) {
+      if (!rec.webauthn) continue;
+
+      // 1. Récupère le secret PRF depuis le gestionnaire
+      const prfSecret = await getWebAuthnPRF(rec.webauthn.credentialId);
+      
+      // 2. Déchiffre la VRAIE passphrase originale
+      const realPassphrase = await decryptPassphraseWithWebAuthn(
+        rec.webauthn.encryptedPassphrase,
+        prfSecret,
+        rec.webauthn.iv
+      );
+
+      // 3. Appelle la fonction d'origine ! Elle gère déjà le PGP, la aesKey et le getIndex()
+      const { unlockedPrivateKey, signingKey, decryptionKey, aesKey } = await unlockPrivateKey(rec, realPassphrase);
+      
+      // 4. Envoie le tout au background
+      broadcastUnlockKey({
+        id: rec.id,
+        unlockedPrivateKey,
+        signingKey,
+        decryptionKey,
+        aesKey
+      });
+    }
+
+    host.toast.success("Clés déverrouillées avec succès via WebAuthn !");
+    await refresh();
+  } catch (err) {
+    const error = err as Error;
+    host.toast.error(`Erreur de déverrouillage : ${error?.message || String(err)}`);
+  } finally {
+    setBusy(false);
+  }
+}
 
   async function initiateUnlock(rec: KeyRecord) {
     const identity = rec.email || host.i18n.t('prompt.unlock_key.fallback_identity');
@@ -349,7 +446,22 @@ export function SettingsSection() {
       keys.length === 0
         ? h('div', { style: { ...card, fontSize: '13px', color: 'var(--color-muted-foreground, #64748b)', marginBottom: '12px' } }, host.i18n.t('settings.no_private_keys'))
         : h('div', { style: { display: 'flex', flexDirection: 'column', gap: '8px', marginBottom: '12px' } },
-          keys.map((rec) => h('div', { key: rec.id, style: { ...card, display: 'flex', flexDirection: 'column', gap: '10px' } },
+            keys.some(k => k.webauthn && !unlocked[k.id]) && h('button', {
+            type: 'button',
+            className: 'composer-btn',
+            style: { marginBottom: '8px', border: '1px solid var(--color-accent, #2563eb)', color: 'var(--color-accent, #2563eb)' },
+            disabled: busy,
+            onClick: handleUnlockAllWithWebAuthn
+          }, [
+            h('svg', { xmlns: 'http://www.w3.org/2000/svg', width: '16px', height: '16px', viewBox: '0 0 24 24', fill: 'none', stroke: 'currentColor', strokeWidth: '2', style: { marginRight: '8px' } }, [
+              h('path', { d: 'M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z' }),
+              h('circle', { cx: '12', cy: '11', r: '3' }),
+              h('path', { d: 'M12 14v4' })
+            ]),
+            "Déverrouiller les clés avec le Passkey / Biométrie"
+          ]),
+
+          ...keys.map((rec) => h('div', { key: rec.id, style: { ...card, display: 'flex', flexDirection: 'column', gap: '10px' } },
             h('div', { style: { display: 'flex', justifyContent: 'space-between', gap: '8px', flexWrap: 'wrap' } },
               h('div', { style: { display: 'flex', alignItems: 'flex-start', gap: '12px' } },
                 h('input', {
@@ -412,6 +524,33 @@ export function SettingsSection() {
                         h('path', { d: 'M240-160h480v-400H240v400Zm296.5-143.5Q560-327 560-360t-23.5-56.5Q513-440 480-440t-56.5 23.5Q400-393 400-360t23.5 56.5Q447-280 480-280t56.5-23.5ZM240-160v-400 400Zm0 80q-33 0-56.5-23.5T160-160v-400q0-33 23.5-56.5T240-640h280v-80q0-83 58.5-141.5T720-920q83 0 141.5 58.5T920-720h-80q0-50-35-85t-85-35q-50 0-85 35t-35 85v80h120q33 0 56.5 23.5T800-560v400q0 33-23.5 56.5T720-80H240Z' })
                       )
                     ),
+
+                h('button', {
+                  type: 'button',
+                  className: 'lock-btn',
+                  style: { 
+                    ...btn, 
+                    color: rec.webauthn ? 'var(--color-success, #16a34a)' : 'var(--color-muted-foreground)' 
+                  },
+                  title: rec.webauthn ? "Biométrie Ok" : "Activer le déverrouillage par empreinte/Bitwarden",
+                  disabled: busy,
+                  onClick: () => handleLinkWebAuthn(rec)
+                }, 
+                  h('svg', { 
+                    xmlns: 'http://www.w3.org/2000/svg', 
+                    width: '1rem', 
+                    height: '1rem', 
+                    viewBox: '0 0 24 24', 
+                    fill: 'none', 
+                    stroke: 'currentColor', 
+                    strokeWidth: '2',
+                    strokeLinecap: 'round',
+                    strokeLinejoin: 'round'
+                  }, [
+                    h('path', { d: 'M2 18v3c0 .6.4 1 1 1h4v-3h3v-3h2l1.4-1.4c.4-.4.6-.9.6-1.4V11c0-2.8-2.2-5-5-5S7 8.2 7 11v1.6c0 .5-.2 1-.6 1.4L2 18z' }),
+                    h('circle', { cx: '17', cy: '7', r: '1' })
+                  ])
+                ),
                 h('button', {
                   type: 'button',
                   style: { ...btn, color: 'var(--color-destructive, #dc2626)', borderColor: 'var(--color-destructive, #dc2626)' },
