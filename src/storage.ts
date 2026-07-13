@@ -7,6 +7,8 @@
  * - session-keys:  unlocked OpenPGP private key objects (session-scoped)
  * - attachments:   email file attachments (durable) // only used when Atarchment + Draft are encrypted
  */
+import host from '@plugin-host';
+import { base64ToBuffer, bufferToBase64 } from "./util.ts";
 
 const DB_NAME = 'pgp-plugin-store';
 const DB_VERSION = 3;
@@ -251,4 +253,131 @@ export async function getMessageCacheBatch(ids: string[]): Promise<Record<string
 export async function clearAllMessageCache(): Promise<void> {
   const db = await openDB();
   await txPromise<undefined>(db, MESSAGE_CACHE_STORE, 'readwrite', (s) => s.clear());
+}
+
+export async function exportPluginData(): Promise<void> {
+  try {
+    const db = await openDB();
+    
+    // 1. Récupération de TOUTES les données durables + index/cache
+    const rawKeys = await txPromise<KeyRecord[]>(db, KEY_RECORDS_STORE, 'readonly', (s) => s.getAll());
+    const rawCerts = await txPromise<PublicCert[]>(db, PUBLIC_CERTS_STORE, 'readonly', (s) => s.getAll());
+    const rawCache = await txPromise<EncryptedMessageCache[]>(db, MESSAGE_CACHE_STORE, 'readonly', (s) => s.getAll());
+
+    // 2. Sérialisation des buffers pour les clés privées (KeyRecords)
+    const serializedKeys = rawKeys.map(key => ({
+      ...key,
+      encryptedPrivateKey: bufferToBase64(key.encryptedPrivateKey),
+      salt: bufferToBase64(key.salt),
+      iv: bufferToBase64(key.iv),
+      webauthn: key.webauthn ? {
+        credentialId: bufferToBase64(key.webauthn.credentialId),
+        encryptedPassphrase: bufferToBase64(key.webauthn.encryptedPassphrase),
+        iv: bufferToBase64(key.webauthn.iv),
+      } : undefined
+    }));
+
+    // 3. Sérialisation des buffers pour l'index/cache (EncryptedMessageCache)
+    const serializedCache = rawCache.map(item => ({
+      id: item.id,
+      encryptedPayload: bufferToBase64(item.encryptedPayload),
+      iv: bufferToBase64(item.iv)
+    }));
+
+    // 4. Construction du package final de sauvegarde
+    const backupPackage = {
+      format: "openpgp-plugin-backup",
+      version: DB_VERSION,
+      createdAt: new Date().toISOString(),
+      keys: serializedKeys,
+      certs: rawCerts,
+      messageCache: serializedCache // <--- Ajout de l'index ici
+    };
+
+    // 5. Génération et téléchargement du fichier JSON
+    const jsonString = JSON.stringify(backupPackage, null, 2);
+    await host.ui.downloadFile({
+      content: jsonString,
+      filename: `pgp_plugin_backup_${new Date().toISOString().split('T')[0]}.json`,
+      contentType: 'application/json'
+    });
+
+  } catch (error) {
+    console.error("Erreur lors de l'exportation:", error);
+    throw new Error("Impossible d'exporter les données.");
+  }
+}
+
+export async function importPluginData(jsonContent: string): Promise<void> {
+  try {
+    const backup = JSON.parse(jsonContent);
+
+    // Validation du format (on vérifie la présence de keys, certs et maintenant de l'index)
+    if (backup.format !== "openpgp-plugin-backup" || !backup.keys || !backup.certs || !backup.messageCache) {
+      throw new Error("Fichier de sauvegarde invalide ou corrompu.");
+    }
+
+    const db = await openDB();
+
+    // 1. Transaction et Import des KeyRecords
+    const txKeys = db.transaction(KEY_RECORDS_STORE, 'readwrite');
+    const storeKeys = txKeys.objectStore(KEY_RECORDS_STORE);
+    for (const key of backup.keys) {
+      const restoredKey: KeyRecord = {
+        ...key,
+        encryptedPrivateKey: base64ToBuffer(key.encryptedPrivateKey) as ArrayBuffer,
+        salt: base64ToBuffer(key.salt) as ArrayBuffer,
+        iv: base64ToBuffer(key.iv) as ArrayBuffer,
+        webauthn: key.webauthn ? {
+          credentialId: base64ToBuffer(key.webauthn.credentialId) as ArrayBuffer,
+          encryptedPassphrase: base64ToBuffer(key.webauthn.encryptedPassphrase) as ArrayBuffer,
+          iv: base64ToBuffer(key.webauthn.iv) as ArrayBuffer,
+        } : undefined
+      };
+      storeKeys.put(restoredKey);
+    }
+
+    // 2. Transaction et Import des Certificats Publics (Contacts)
+    const txCerts = db.transaction(PUBLIC_CERTS_STORE, 'readwrite');
+    const storeCerts = txCerts.objectStore(PUBLIC_CERTS_STORE);
+    for (const cert of backup.certs) {
+      storeCerts.put(cert);
+    }
+
+    // 3. Transaction et Import de l'Index/Cache des Messages (MessageCache)
+    const txCache = db.transaction(MESSAGE_CACHE_STORE, 'readwrite');
+    const storeCache = txCache.objectStore(MESSAGE_CACHE_STORE);
+    for (const item of backup.messageCache) {
+      // Note : On reconvertit en Uint8Array car l'interface attend un Uint8Array pour le cache
+      const rawPayload = base64ToBuffer(item.encryptedPayload);
+      const rawIv = base64ToBuffer(item.iv);
+
+      if (rawPayload && rawIv) {
+        const restoredCache: EncryptedMessageCache = {
+          id: item.id,
+          encryptedPayload: new Uint8Array(rawPayload),
+          iv: new Uint8Array(rawIv)
+        };
+        storeCache.put(restoredCache);
+      }
+    }
+
+    // 4. Attente de la validation de toutes les transactions IndexedDB
+    await new Promise<void>((resolve, reject) => {
+      let count = 3; // 3 stores à synchroniser désormais
+      const done = () => { if (--count === 0) resolve(); };
+      
+      txKeys.oncomplete = done;
+      txCerts.oncomplete = done;
+      txCache.oncomplete = done;
+      
+      txKeys.onerror = () => reject(txKeys.error);
+      txCerts.onerror = () => reject(txCerts.error);
+      txCache.onerror = () => reject(txCache.error);
+    });
+
+  } catch (error) {
+    console.error("Erreur lors de l'importation:", error);
+    throw error;
+  }
 }

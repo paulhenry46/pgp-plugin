@@ -3,8 +3,6 @@
  * Checks Content-Type, JMAP bodyStructure, attachment metadata, and inline text.
  */
 
-import { extractEmailContent } from "../util.ts";
-
 export interface PgpDetectionResult {
   type: 'pgp-inline-encrypted' | 'pgp-inline-signed' | 'pgp-mime-encrypted' | 'pgp-mime-signed' | 'pgp-encrypted-file' | 'pgp-signature-file' | null;
   supported: boolean;
@@ -170,4 +168,30 @@ function findPgpMimePart(bodyStructure: any, protocolType: string): any | null {
     }
   }
   return null;
+}
+
+function extractEmailContent(bodyStructure: any, bodyValues: any): { plainText: string | null, htmlText: string | null } {
+    let plainText = null;
+    let htmlText = null;
+
+    // Direct check if subParts exists and is an array
+    if (bodyStructure && Array.isArray(bodyStructure.subParts)) {
+        for (const part of bodyStructure.subParts) {
+            if (part.type === "text/plain" && bodyValues[part.partId]) {
+                plainText = bodyValues[part.partId].value;
+            } else if (part.type === "text/html" && bodyValues[part.partId]) {
+                htmlText = bodyValues[part.partId].value;
+            }else if(part.type === "multipart/alternative"){
+                for (const subpart of part.subParts) {
+                  if (subpart.type === "text/plain" && bodyValues[subpart.partId]) {
+                      plainText = bodyValues[subpart.partId].value;
+                  } else if (subpart.type === "text/html" && bodyValues[subpart.partId]) {
+                      htmlText = bodyValues[subpart.partId].value;
+                  }
+              }
+            }
+        }
+    }
+
+    return { plainText, htmlText };
 }

@@ -87,17 +87,10 @@ export function emailsOf(input: any): string[] {
 
 // ─── Blob/bytes helpers ────────────────────────────────────────────────
 
-export async function blobToBytes(blob: Blob): Promise<Uint8Array> {
-  return new Uint8Array(await blob.arrayBuffer());
-}
 export function bytesArrayBuffer(u8: Uint8Array) {
   return u8.buffer.slice(u8.byteOffset, u8.byteOffset + u8.byteLength) as ArrayBuffer;
 }
 
-/**
- * Convertit un ArrayBuffer en tableau de nombres (number[]) 
- * pour pouvoir le transférer proprement via le pont RPC JSON/postMessage.
- */
 export function bufferToBytes(buffer: ArrayBuffer): number[] {
   return Array.from(new Uint8Array(buffer));
 }
@@ -110,77 +103,31 @@ export function bytesToBuffer(bytes: number[]): ArrayBuffer {
   return new Uint8Array(bytes).buffer;
 }
 
-
-export async function fetchBlobAsDataUrl(blobId: string, options?: { name?: string; type?: string }): Promise<string> {
-  // 1. Récupérer le Uint8Array
-  const bytes = await host.jmap.fetchBlob(blobId, options);
-
-
-  
-  // 2. Spécifier le type MIME (par défaut application/octet-stream si non fourni)
-  const mimeType = options?.type || 'application/octet-stream';
-
-  // 3. Convertir en Data URL à l'aide de l'API FileReader
-  return new Promise((resolve, reject) => {
-    const blob = new Blob([bytes as BlobPart], { type: mimeType });
-    const reader = new FileReader();
-    
-    reader.onloadend = () => resolve(reader.result as string);
-    reader.onerror = () => reject(reader.error);
-    
-    reader.readAsDataURL(blob);
-  });
+export function bufferToBase64(buffer: ArrayBuffer | Uint8Array | undefined): string | undefined {
+  if (!buffer) return undefined;
+  const bytes = buffer instanceof Uint8Array ? buffer : new Uint8Array(buffer);
+  let binary = '';
+  for (let i = 0; i < bytes.byteLength; i++) {
+    binary += String.fromCharCode(bytes[i]);
+  }
+  return btoa(binary);
 }
 
-export function extractEmailContent(bodyStructure: any, bodyValues: any): { plainText: string | null, htmlText: string | null } {
-    let plainText = null;
-    let htmlText = null;
-
-    // Direct check if subParts exists and is an array
-    if (bodyStructure && Array.isArray(bodyStructure.subParts)) {
-        for (const part of bodyStructure.subParts) {
-            if (part.type === "text/plain" && bodyValues[part.partId]) {
-                plainText = bodyValues[part.partId].value;
-            } else if (part.type === "text/html" && bodyValues[part.partId]) {
-                htmlText = bodyValues[part.partId].value;
-            }else if(part.type === "multipart/alternative"){
-                for (const subpart of part.subParts) {
-                  if (subpart.type === "text/plain" && bodyValues[subpart.partId]) {
-                      plainText = bodyValues[subpart.partId].value;
-                  } else if (subpart.type === "text/html" && bodyValues[subpart.partId]) {
-                      htmlText = bodyValues[subpart.partId].value;
-                  }
-              }
-            }
-        }
-    }
-
-    return { plainText, htmlText };
+// Convertit une chaîne Base64 en ArrayBuffer
+export function base64ToBuffer(base64: string | undefined): ArrayBuffer | undefined {
+  if (!base64) return undefined;
+  const binaryString = atob(base64);
+  const len = binaryString.length;
+  const bytes = new Uint8Array(len);
+  for (let i = 0; i < len; i++) {
+    bytes[i] = binaryString.charCodeAt(i);
+  }
+  return bytes.buffer;
 }
+
 
 // -------- Key Resolution--------
 
-export async function signingKeyRecordForEmail(fromEmail: string | undefined): Promise<KeyRecord | undefined> {
-  const recs = await listKeyRecords();
-  const lower = (fromEmail || '').toLowerCase();
-  return (
-    recs.find((r) => r.email === lower && r.capabilities?.canSign !== false) ||
-    recs.find((r) => r.email === lower) ||
-    undefined
-  );
-}
-
-export async function recipientKeysFor(emails:any) {
-  const certs = await listPublicCerts();
-  const found = [];
-  const missing = [];
-  for (const email of emails) {
-    const c = certs.find((pc) => pc.email.toLowerCase() === email.toLowerCase());
-    if (c) found.push(c.publicKey); // Utilise .publicKey au lieu de .certificate
-    else missing.push(email);
-  }
-  return { found, missing };
-}
 
 // Build the map of unlocked private keys from the session store.
 export async function unlockedDecryptMaps() {

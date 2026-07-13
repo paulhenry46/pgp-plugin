@@ -5,10 +5,10 @@ import * as openpgp from 'openpgp';
 import { buildMimeMessage, wrapAsPgpMimeEncrypted, wrapAsPgpMimeSigned } from '../mime/builder.ts';
 import { pgpSignDetached } from '../pgp/pgp-sign.ts';
 import { pgpEncrypt } from '../pgp/encrypt.ts';
-import { clearArmoredPrivateKeyToPrivateKey, recipientKeysFor, signingKeyRecordForEmail } from '../util.ts';
-import { KeyRecord } from '../storage.ts';
+import { clearArmoredPrivateKeyToPrivateKey } from '../util.ts';
+import { KeyRecord, listKeyRecords, listPublicCerts } from '../storage.ts';
 
-import {emailsOf, blobToBytes, bytesArrayBuffer} from '../util.ts';
+import {emailsOf, bytesArrayBuffer} from '../util.ts';
 import { INTENT_KEY, settings} from '../shared.ts';
 import { isCapable } from '../index.tsx';
 import { fetchKeyFromBackground } from '../pgp/session-broadcast.ts';
@@ -42,6 +42,33 @@ export interface ComposeRequest {
   text?: string;      
   html?: string;      
 }
+
+ async function signingKeyRecordForEmail(fromEmail: string | undefined): Promise<KeyRecord | undefined> {
+  const recs = await listKeyRecords();
+  const lower = (fromEmail || '').toLowerCase();
+  return (
+    recs.find((r) => r.email === lower && r.capabilities?.canSign !== false) ||
+    recs.find((r) => r.email === lower) ||
+    undefined
+  );
+}
+
+export async function recipientKeysFor(emails:any) {
+  const certs = await listPublicCerts();
+  const found = [];
+  const missing = [];
+  for (const email of emails) {
+    const c = certs.find((pc) => pc.email.toLowerCase() === email.toLowerCase());
+    if (c) found.push(c.publicKey); // Utilise .publicKey au lieu de .certificate
+    else missing.push(email);
+  }
+  return { found, missing };
+}
+  
+async function blobToBytes(blob: Blob): Promise<Uint8Array> {
+  return new Uint8Array(await blob.arrayBuffer());
+}
+
 async function resolveIntent(req:any) {
   const pick = (...vals:any[]) => {
     for (const v of vals) if (typeof v === 'boolean') return v;

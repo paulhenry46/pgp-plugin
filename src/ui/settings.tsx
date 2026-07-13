@@ -6,7 +6,7 @@ const h = React.createElement;
 const { useState, useEffect, useCallback, useRef } = React;
 import {
   saveKeyRecord, listKeyRecords, deleteKeyRecord, listPublicCerts, deletePublicCert,
-  KeyRecord, PublicCert
+  KeyRecord, PublicCert, exportPluginData, importPluginData
 } from '../storage.ts';
 
 import { importOpenPgpPrivateKey, importOpenPgpPublicKey, unlockPrivateKey } from '../pgp/import.ts';
@@ -33,8 +33,10 @@ export function SettingsSection() {
   
   const fileRef = useRef<HTMLInputElement | null>(null);
   const certFileRef = useRef<HTMLInputElement | null>(null);
+  const jsonFileRef = useRef<HTMLInputElement | null>(null);
   const [searchEmail, setSearchEmail] = useState<string>('');
 
+  
   const refresh = useCallback(async () => {
     if (!(await isCapable())) { setCapable(false); return; }
     const [k, c] = await Promise.all([listKeyRecords(), listPublicCerts()]);
@@ -362,6 +364,47 @@ export function SettingsSection() {
       const error = err as Error;
       host.toast.error(host.i18n.t('settings.error.generic', { message: error?.message ? error.message : String(err) }));
     } finally {
+      setBusy(false);
+    }
+  }
+
+  async function handleExportJSON() {
+    setBusy(true);
+    try {
+      await exportPluginData();
+      host.toast.success(host.i18n.t('settings.success.json_exported'));
+    } catch (err: any) {
+      host.toast.error(host.i18n.t('settings.error.json_export_failed', { message: err.message }));
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function handleImportJSON() {
+    const file = jsonFileRef.current && jsonFileRef.current.files && jsonFileRef.current.files[0];
+    if (!file) return;
+
+    const ok = await host.ui.confirm({
+      title: host.i18n.t('settings.import_json'),
+      message: host.i18n.t('settings.confirm.import_json'),
+      danger: true,
+      confirmLabel: host.i18n.t('settings.action.import'),
+    });
+    if (!ok) {
+      if (jsonFileRef.current) jsonFileRef.current.value = '';
+      return;
+    }
+
+    setBusy(true);
+    try {
+      const text = new TextDecoder().decode(await file.arrayBuffer());
+      await importPluginData(text);
+      host.toast.success(host.i18n.t('settings.success.json_imported'));
+      await refresh();
+    } catch (err: any) {
+      host.toast.error(host.i18n.t('settings.error.json_import_failed', { message: err.message }));
+    } finally {
+      if (jsonFileRef.current) jsonFileRef.current.value = '';
       setBusy(false);
     }
   }
@@ -749,10 +792,53 @@ export function SettingsSection() {
           h('svg', { xmlns: 'http://www.w3.org/2000/svg', width: '16px', height: '16px', viewBox: '0 0 24 24', fill: 'none', stroke: 'currentColor', strokeWidth: '2', strokeLinecap: 'round', strokeLinejoin: 'round', style: { marginRight: '6px' } }, [
             h('circle', { cx: '11', cy: '11', r: '8' }), h('line', { x1: '21', y1: '21', x2: '16.65', y2: '16.65' })
           ]),
-          'Search'
+          host.i18n.t('settings.search_public_key')
         ])
       )
     )
+    ),
+    h('div', { style: { borderTop: '1px solid var(--color-border, #e2e8f0)', paddingTop: '16px', marginTop: '8px' } },
+      h('h3', { style: { margin: '0 0 4px', fontSize: '15px', fontWeight: 600 } }, host.i18n.t('settings.json_backup_title')),
+      h('p', { style: { margin: '0 0 12px', fontSize: '13px', color: 'var(--color-muted-foreground, #64748b)' } },
+        host.i18n.t('settings.json_backup_desc')),
+      
+      h('div', { style: { display: 'flex', gap: '12px' } }, [
+        h('button', {
+          type: 'button',
+          className: 'composer-btn',
+          style: { flex: 1 },
+          disabled: busy,
+          onClick: handleExportJSON
+        }, [
+          h('svg', { xmlns: 'http://www.w3.org/2000/svg', width: '1rem', height: '1rem', viewBox: '0 0 24 24', fill: 'none', stroke: 'currentColor', strokeWidth: '2', strokeLinecap: 'round', strokeLinejoin: 'round', style: { marginRight: '0.5rem' } }, [
+            h('path', { d: 'M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4' }),
+            h('polyline', { points: '7 10 12 15 17 10' }),
+            h('line', { x1: '12', y1: '15', x2: '12', y2: '3' })
+          ]),
+          host.i18n.t('settings.export_json')
+        ]),
+        h('input', {
+          ref: jsonFileRef,
+          type: 'file',
+          accept: '.json',
+          style: { display: 'none' },
+          onChange: handleImportJSON
+        }),
+        h('button', {
+          type: 'button',
+          className: 'composer-btn',
+          style: { flex: 1 },
+          disabled: busy,
+          onClick: () => jsonFileRef.current && jsonFileRef.current.click()
+        }, [
+          h('svg', { xmlns: 'http://www.w3.org/2000/svg', width: '1rem', height: '1rem', viewBox: '0 0 24 24', fill: 'none', stroke: 'currentColor', strokeWidth: '2', strokeLinecap: 'round', strokeLinejoin: 'round', style: { marginRight: '0.5rem' } }, [
+            h('path', { d: 'M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4' }),
+            h('polyline', { points: '17 8 12 3 7 8' }),
+            h('line', { x1: '12', y1: '3', x2: '12', y2: '15' })
+          ]),
+          host.i18n.t('settings.import_json')
+        ])
+      ])
     ),
   );
 }

@@ -21,6 +21,7 @@
     "ui:settings-section",
     "app:lifecycle",
     "ui:email-details",
+    "ui:download-file",
     "http:fetch"
   ],
   "httpOrigins": [
@@ -187,7 +188,19 @@
       "settings.error.generic_failure": "Failure : {message}",
       "settings.error.unlock_all_failed": "Error unlocking keys : {message}",
       "settings.error.unlock_failed": "{message}",
-      "settings.error.fallback_unlock_failed": "Unlock failed"
+      "settings.error.fallback_unlock_failed": "Unlock failed",
+      "settings.json_backup_title": "JSON Backup",
+      "settings.json_backup_desc": "Export all your OpenPGP keys and settings as a JSON file. This file is encrypted with your default key's passphrase, so keep it safe.",
+      "settings.export_json": "Export to JSON",
+      "settings.import_json": "Import from JSON",
+      "settings.search_public_key": "Search public key",
+      "settings.success.json_imported": "Plugin data imported successfully!",
+      "settings.error.json_import_failed": "JSON import failed: {message}",
+      "settings.confirm.import_json": "Are you sure you want to import this JSON file? This will merge or overwrite your current keys and indexing cache.",
+      "settings.action.import": "Import",
+      "settings.action.export": "Export",
+      "settings.success.json_exported": "Backup exported successfully!",
+      "settings.error.json_export_failed": "JSON export failed: {message}"
     }
   }
 }
