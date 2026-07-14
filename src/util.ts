@@ -121,7 +121,7 @@ export function base64ToBuffer(base64: string | undefined): ArrayBuffer | undefi
 }
 
 
-// -------- Key Resolution--------
+//──────────── Key Resolution────────────────────────────────────
 
 
 // Build the map of unlocked private keys from the session store.

@@ -258,12 +258,10 @@ export async function exportPluginData(): Promise<void> {
   try {
     const db = await openDB();
     
-    // 1. Récupération de TOUTES les données durables + index/cache
     const rawKeys = await txPromise<KeyRecord[]>(db, KEY_RECORDS_STORE, 'readonly', (s) => s.getAll());
     const rawCerts = await txPromise<PublicCert[]>(db, PUBLIC_CERTS_STORE, 'readonly', (s) => s.getAll());
     const rawCache = await txPromise<EncryptedMessageCache[]>(db, MESSAGE_CACHE_STORE, 'readonly', (s) => s.getAll());
 
-    // 2. Sérialisation des buffers pour les clés privées (KeyRecords)
     const serializedKeys = rawKeys.map(key => ({
       ...key,
       encryptedPrivateKey: bufferToBase64(key.encryptedPrivateKey),
@@ -276,24 +274,21 @@ export async function exportPluginData(): Promise<void> {
       } : undefined
     }));
 
-    // 3. Sérialisation des buffers pour l'index/cache (EncryptedMessageCache)
     const serializedCache = rawCache.map(item => ({
       id: item.id,
       encryptedPayload: bufferToBase64(item.encryptedPayload),
       iv: bufferToBase64(item.iv)
     }));
 
-    // 4. Construction du package final de sauvegarde
     const backupPackage = {
       format: "openpgp-plugin-backup",
       version: DB_VERSION,
       createdAt: new Date().toISOString(),
       keys: serializedKeys,
       certs: rawCerts,
-      messageCache: serializedCache // <--- Ajout de l'index ici
+      messageCache: serializedCache
     };
 
-    // 5. Génération et téléchargement du fichier JSON
     const jsonString = JSON.stringify(backupPackage, null, 2);
     await host.ui.downloadFile({
       content: jsonString,
@@ -309,15 +304,11 @@ export async function exportPluginData(): Promise<void> {
 export async function importPluginData(jsonContent: string): Promise<void> {
   try {
     const backup = JSON.parse(jsonContent);
-
-    // Validation du format (on vérifie la présence de keys, certs et maintenant de l'index)
     if (backup.format !== "openpgp-plugin-backup" || !backup.keys || !backup.certs || !backup.messageCache) {
       throw new Error("Fichier de sauvegarde invalide ou corrompu.");
     }
 
     const db = await openDB();
-
-    // 1. Transaction et Import des KeyRecords
     const txKeys = db.transaction(KEY_RECORDS_STORE, 'readwrite');
     const storeKeys = txKeys.objectStore(KEY_RECORDS_STORE);
     for (const key of backup.keys) {
@@ -335,18 +326,16 @@ export async function importPluginData(jsonContent: string): Promise<void> {
       storeKeys.put(restoredKey);
     }
 
-    // 2. Transaction et Import des Certificats Publics (Contacts)
     const txCerts = db.transaction(PUBLIC_CERTS_STORE, 'readwrite');
     const storeCerts = txCerts.objectStore(PUBLIC_CERTS_STORE);
     for (const cert of backup.certs) {
       storeCerts.put(cert);
     }
 
-    // 3. Transaction et Import de l'Index/Cache des Messages (MessageCache)
     const txCache = db.transaction(MESSAGE_CACHE_STORE, 'readwrite');
     const storeCache = txCache.objectStore(MESSAGE_CACHE_STORE);
     for (const item of backup.messageCache) {
-      // Note : On reconvertit en Uint8Array car l'interface attend un Uint8Array pour le cache
+
       const rawPayload = base64ToBuffer(item.encryptedPayload);
       const rawIv = base64ToBuffer(item.iv);
 
@@ -360,9 +349,8 @@ export async function importPluginData(jsonContent: string): Promise<void> {
       }
     }
 
-    // 4. Attente de la validation de toutes les transactions IndexedDB
     await new Promise<void>((resolve, reject) => {
-      let count = 3; // 3 stores à synchroniser désormais
+      let count = 3;
       const done = () => { if (--count === 0) resolve(); };
       
       txKeys.oncomplete = done;
