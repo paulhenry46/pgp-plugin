@@ -28,11 +28,11 @@ jobs:
         run: npm run package
 
       - name: Check ZIP exists
-        run: test -f openpgp.zip
+        run: test -f pgpe2e.zip
 
       - name: Upload Release Asset
         uses: softprops/action-gh-release@v2
         with:
-          files: openpgp.zip
+          files: pgpe2e.zip
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
