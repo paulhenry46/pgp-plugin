@@ -9,10 +9,12 @@ import { extractKeyInfo, scanAndImportKeysFromAttachments } from '../pgp/key-uti
 
 import { addrList} from '../util.ts';
 import { VERIFY_PREFIX, STATE_PREFIX} from '../shared.ts';
-import { listPublicCerts } from '../storage.ts';
+import { getKeyRecord, listPublicCerts } from '../storage.ts';
 import {unlockedDecryptMaps} from '../util.ts';
 import { isCapable } from '../index.tsx';
 import { indexAndPersistDecryptedMail } from '../cache.ts';
+import { unlockPrivateKey } from '../pgp/import.ts';
+import { broadcastUnlockKey } from '../pgp/session-broadcast.ts';
 
 /**
  * Main entry point for rendering PGP-processed email bodies.
@@ -350,3 +352,6 @@ async function persistEmailListState(emailId: string, status: any) {
   if (!emailId) return;
  try { await host.storage.set(STATE_PREFIX + emailId, status); } catch { /* ignore */ }
 }
+
+
+        

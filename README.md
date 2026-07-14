@@ -16,8 +16,7 @@ browser — no key material ever leaves the device.
 - **Public Key Attachment** — There is an option to automatically send as an attachment the public key corresponding to your adress.
 - **Import / Export** — You can import and exports the local search/preview index and your keys.
 ## Roadmap (=  not implemented yet, for future versions)
-### 1.0.0
-- implements rerenderEmailBody when unlocked + prompte to unlock if needed
+
 ### Future
  - check during emails writing if to,cc,bcc adresses have pubkey and show badge next to them if yes or not
  - if some adresses doesnt have key, propmt for confirmation before sending 2 mails whith same messageID : one encrypted to on those who have public key and not encrptyed to thoses who doesnet' have

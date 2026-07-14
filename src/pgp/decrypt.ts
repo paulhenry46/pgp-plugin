@@ -1,6 +1,9 @@
 import * as openpgp from 'openpgp';
-import {KeyRecord} from '../storage.ts';
+import {getKeyRecord, KeyRecord} from '../storage.ts';
 import { clearArmoredPrivateKeyToPrivateKey } from '../util.ts';
+import { unlockPrivateKey } from './import.ts';
+import { broadcastUnlockKey } from './session-broadcast.ts';
+import host from '@plugin-host';
 
 export class PgpKeyLockedError extends Error {
   public keyRecordId: string;
@@ -65,6 +68,7 @@ export async function pgpDecrypt(input: {
   // 4. Handling locked keys
   const lockedRecord = (await matchedRecords).find((record:any) => !unlockedKeys.has(record.id));
   if (lockedRecord) {
+    await askForKeyAndRerender(lockedRecord.id, lockedRecord.email);
     throw new PgpKeyLockedError(
       'The PGP key is locked. Please enter your passphrase to decrypt.',
       lockedRecord.id,
@@ -147,3 +151,33 @@ export function normalizePgpMessage(raw: Uint8Array | string): string {
 
   return text;
 }
+
+async function askForKeyAndRerender(keyRecordId: string, identity: string): Promise<void> {
+  const result = await host.ui.prompt({
+        title: host.i18n.t('prompt.unlock_key.title'),
+        message: `${host.i18n.t('prompt.unlock_key.message_prefix')}${identity}${host.i18n.t('prompt.unlock_key.message_suffix')}`,
+        fields: [{ 
+          name: 'passphrase', 
+          label: host.i18n.t('prompt.unlock_key.passphrase_label'), 
+          type: 'password', 
+          required: true 
+        }]
+      });
+    if (!result || !result.passphrase) {
+      return; 
+    }
+    const rec = await getKeyRecord(keyRecordId);
+    if (!rec) {
+      throw new Error('Key record not found for ID: ' + keyRecordId);
+    }
+    const { unlockedPrivateKey, signingKey, decryptionKey, aesKey } = await unlockPrivateKey(rec, result.passphrase);
+          
+    broadcastUnlockKey({ 
+            id: rec.id, 
+            unlockedPrivateKey, 
+            signingKey, 
+            decryptionKey ,
+            aesKey: aesKey,
+          });
+          host.ui.rerenderEmail();
+        }

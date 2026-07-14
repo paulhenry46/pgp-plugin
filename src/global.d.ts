@@ -37,6 +37,7 @@ declare module '@plugin-host' {
         fields?: Array<{ name: string; label: string; type?: 'text' | 'password'; placeholder?: string; required?: boolean }>;
       }): Promise<Record<string, string> | null>;
       downloadFile: (opts: { content: string; filename: string; contentType?: string }) => Promise<void>;
+      rerenderEmail(): void;
   };
   export const plugin: {
     settings?: {
