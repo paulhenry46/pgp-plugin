@@ -15,7 +15,7 @@ End-to-end PGP for Bulwark Webmail, implemented as a **privileged** (same-origin
 - **Public Key Attachment** — One-click option to automatically attach your public key to outgoing emails.
 - **Import / Export** — Easily backup and restore your local search/preview index and PGP keys.
 
----
+For more details, refers to [DOCS.md](DOCS.md) file.
 
 ## Security & Threat Model
 
