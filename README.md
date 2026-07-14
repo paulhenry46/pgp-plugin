@@ -32,11 +32,11 @@ browser — no key material ever leaves the device.
   `resolvePluginTier`, the same-origin tier is only granted to a **signed,
   admin-approved (managed)** bundle after high-risk consent. A self-uploaded
   copy is refused, not downgraded — sign and ship it through the admin channel.
-- **Keys at rest.** Private keys are imported from PKCS#12 and re-wrapped with
+- **Keys at rest.** Private keys are re-wrapped with
   AES-256-GCM under a PBKDF2(SHA-256, 600 000) key derived from a passphrase
   you choose. Stored in IndexedDB; the raw key bytes are never persisted.
-- **Keys in use.** Unlocking store the key in RAM. There are NEVER persisted to IndexedDB or disk.
-- Returned HTML still passes through the host sanitizer. How it works ? The background part of the plugin acts like a service worker. It communicates keys to other sandboxed plugin components. It means that if another plugin / something else can inject script in the client, he can steal your keys. But there is the same vulenaribilty if we store them in the indexedDB cleared when in use.
+- **Keys in use.** Unlocking store the key in RAM. There are NEVER persisted to IndexedDB or disk. How it works ? The background part of the plugin acts like a service worker. It communicates keys to other sandboxed plugin components. It means that if another plugin / something else can inject script in the client, he can steal your keys. But there is the same vulenaribilty if we store them in the indexedDB cleared when in use.
+- Returned HTML still passes through the host sanitizer. 
 
 ## Build
 
@@ -46,10 +46,6 @@ npm install          # pulls pkijs / asn1js / pvtsutils / webcrypto-liner + esbu
 npm run build        # → dist/index.js  (~1.7 MB, under the privileged cap)
 npm run package      # → openpgp.zip (manifest.json + index.js) for admin upload
 ```
-
-The build aliases the Node `crypto` builtin (referenced by a dead
-`typeof process` branch in `asmcrypto.js`) to a browser shim so the bundle is
-self-contained.
 
 ## Dependencies
 We use
