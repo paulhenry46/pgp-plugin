@@ -6,7 +6,7 @@ browser — no key material ever leaves the device.
 
 ## Main Features
 
-- **Core Cryptography** — Seamlessly encrypt, decrypt, sign, and verify emails locally using OpenPGP engine.
+- **Core Cryptography** — Seamlessly encrypt, decrypt, sign, and verify emails locally using OpenPGP engine (PGP/MIME : read/send, Inline-PGP : read only).
 - **Zero-Disk Session Security (100% RAM)** — Unlike traditional plugins that temporarily write unlocked secret keys to shared browser storage (like IndexedDB), **PGP True E2E** isolates unlocked keys strictly within an in-memory Web Worker. Your decrypted keys never touch the disk, not even for a millisecond, ensuring instant destruction upon tab closure or crash.
 - **True End-to-End Drafts & Attachments** — Standard PGP extensions only encrypt when you hit "Send", leaving your auto-saved drafts and attachments exposed to the server in cleartext while you write. This plugin intercepts the webmail's auto-save and upload cycles, encrypting drafts and attachments *locally in the browser* before they ever reach the network.
 - **Encrypted-at-Rest Local Search Index** —  **PGP True E2E** securely decrypts and indexes your emails into a local, encrypted-at-rest database. Search your secure history instantly without leaking a single keyword to the server or writing decrypted text to the disk.
