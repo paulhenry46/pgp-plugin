@@ -90,7 +90,7 @@ export function initBackgroundSessionListener(): void {
           if (!defaultKey) {
             return;
           }
-         const aesKey = _backgroundSessionKeys[defaultKey.id].aesKey;
+         const aesKey = _backgroundSessionKeys[defaultKey.id]?.aesKey;
          if (!aesKey) {
             channel.postMessage({
               type: 'RESPONSE_CUSTOM_SECRET',
