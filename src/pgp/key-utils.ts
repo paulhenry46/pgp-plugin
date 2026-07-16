@@ -253,3 +253,26 @@ async function maybeAutoImportSigner(pub:string) {
     host.log.warn('auto-import signer key failed', err);
   }
 }
+
+/**
+ * Chiffre un texte fixe avec la clé AES existante pour créer le secret CryptPad.
+ * Ne nécessite AUCUNE modification de ta fonction de dérivation d'origine !
+ */
+export async function deriveSecret(aesKey: CryptoKey, salt:string): Promise<string> {
+  const enc = new TextEncoder();
+  
+  const messageFixe = enc.encode(salt);
+  const iv = new Uint8Array(12); 
+
+  const ciphertext = await crypto.subtle.encrypt(
+    {
+      name: "AES-GCM",
+      iv: iv
+    },
+    aesKey,
+    messageFixe
+  );
+  const uint8Array = new Uint8Array(ciphertext);
+  const binaryString = Array.from(uint8Array, byte => String.fromCharCode(byte)).join('');
+  return btoa(binaryString);
+}

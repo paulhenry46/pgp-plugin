@@ -96,6 +96,6 @@ export async function activate(api :any) {
   
   api.log.info('OpenPGP plugin activated with memory-only session management.');
   if(settings().askForDefaultKeyPassOnActivated){
-      await askForDefaultKeyPass(api);
+      await askForDefaultKeyPass();
   }
 }

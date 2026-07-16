@@ -1,5 +1,6 @@
 import { getPreview, search } from '../cache.ts';
-import { DecryptedCachePayload, SessionKeysEntry } from '../storage.ts';
+import { DecryptedCachePayload, listKeyRecords, SessionKeysEntry } from '../storage.ts';
+import { deriveSecret } from './key-utils.ts';
 
 const CHANNEL_NAME = 'pgp-session-bus';
 
@@ -19,7 +20,9 @@ type SessionMessage =
   | { type: 'RESPONSE_PREVIEWS_BATCH'; requestId: string; previews: Record<string, string> }
   | { type: 'REQUEST_SEARCH'; requestId: string; query: string }
   | { type: 'RESPONSE_SEARCH'; requestId: string; matchingIds: string[] }
-  | { type: 'UPDATE_RAM_INDEX_ENTRY'; id: string; payload: DecryptedCachePayload };
+  | { type: 'UPDATE_RAM_INDEX_ENTRY'; id: string; payload: DecryptedCachePayload }
+  | { type: 'REQUEST_CUSTOM_SECRET'; requestId: string; salt: string; }
+  | { type: 'RESPONSE_CUSTOM_SECRET'; requestId: string; secret: string | null };
 
 export function initBackgroundSessionListener(): void {
   const channel = new BroadcastChannel(CHANNEL_NAME);
@@ -78,6 +81,34 @@ export function initBackgroundSessionListener(): void {
       case 'UPDATE_RAM_INDEX_ENTRY':
       _ramDecryptedIndex[msg.id] = msg.payload;
       break;
+      case 'REQUEST_CUSTOM_SECRET': {
+
+        (async () => {
+        const allKeys = await listKeyRecords();
+        const defaultKey = allKeys.find((k) => k.default === true);
+
+          if (!defaultKey) {
+            return;
+          }
+         const aesKey = _backgroundSessionKeys[defaultKey.id].aesKey;
+         if (!aesKey) {
+            channel.postMessage({
+              type: 'RESPONSE_CUSTOM_SECRET',
+              requestId: msg.requestId,
+              secret: null
+            });
+            return;
+          }
+        const secret = await deriveSecret(aesKey, msg.salt);
+        
+        channel.postMessage({
+          type: 'RESPONSE_CUSTOM_SECRET',
+          requestId: msg.requestId,
+          secret: secret
+        });
+        })();
+        break;
+      }
     }
   };
 }

@@ -1,17 +1,18 @@
 import { unlockPrivateKey } from "../pgp/import.ts";
 import { broadcastUnlockKey } from "../pgp/session-broadcast.ts";
 import { getDefaultKeyRecord } from "../storage.ts";
+import host from '@plugin-host';
 
-export async function askForDefaultKeyPass(api: any): Promise<void> {
+export async function askForDefaultKeyPass(): Promise<void> {
   const defaultKey = await getDefaultKeyRecord();
 
   if (defaultKey) {
-    const result = await api.ui.prompt({
-      title: api.i18n.t('prompt.unlock_default_key.title'),
-      message: api.i18n.t('prompt.unlock_default_key.message'),
+    const result = await host.ui.prompt({
+      title: host.i18n.t('prompt.unlock_default_key.title'),
+      message: host.i18n.t('prompt.unlock_default_key.message'),
       fields: [{ 
         name: 'passphrase', 
-        label: api.i18n.t('prompt.unlock_default_key.passphrase_label'), 
+        label: host.i18n.t('prompt.unlock_default_key.passphrase_label'), 
         type: 'password', 
         required: true 
       }]
