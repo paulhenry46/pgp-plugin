@@ -1,4 +1,6 @@
 # PGP True E2E Plugin
+> [!CAUTION]
+> To get all features (local search, webauthn, export/import settings) you must use the current version "main" of bulwark mail ! Indeed, current release (1.7.7) doesn't support all features !
 
 End-to-end PGP for Bulwark Webmail, implemented as a **privileged** (same-origin) plugin. All cryptography runs locally in the browser — no key material ever leaves your device.
 
