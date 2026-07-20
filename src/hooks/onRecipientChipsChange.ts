@@ -15,7 +15,7 @@ export type Recipient = {
   name?: string;
   email: string;
   group?: { members: Array<{ name?: string; email: string }> };
-  extra?: {
+  extra: {
     color?: string; // optional color for display purposes. May be populated by plugins via the onRecipientChipsChange hook.
     icon?: IconName; // optional icon for display purposes. May be populated by plugins via the onRecipientChipsChange hook.
   };
@@ -31,11 +31,15 @@ export async function onRecipientChipsChange(chips: Recipient[]): Promise<Recipi
     if (settings().tryToFetchMissingKeys) {
         for (const email of missing) {
             if (!(await getRecipient(email))) {
-                const { armored } = await lookup(email);
-                if (armored) {
-                    await importOpenPgpPublicKey(armored);
-                    missingEmails.delete(email); // Successfully found key, no longer missing
-                } else {
+                try{
+                    const { armored } = await lookup(email);
+                    if (armored) {
+                        await importOpenPgpPublicKey(armored);
+                        missingEmails.delete(email); // Successfully found key, no longer missing
+                    } else {
+                        await saveRecipient({ email: email, hasNotPublicKey: true });
+                    }
+                }catch(e){
                     await saveRecipient({ email: email, hasNotPublicKey: true });
                 }
             }
@@ -43,7 +47,7 @@ export async function onRecipientChipsChange(chips: Recipient[]): Promise<Recipi
     }
 
     // Return updated chips with lock icon and success color if they have a valid key
-    return chips.map(chip => {
+    const newChips: Recipient[] = chips.map(chip => {
         if (!missingEmails.has(chip.email)) {
             return {
                 ...chip,
@@ -56,4 +60,5 @@ export async function onRecipientChipsChange(chips: Recipient[]): Promise<Recipi
         }
         return chip;
     });
+    return newChips;
 }
