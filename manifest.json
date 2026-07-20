@@ -66,6 +66,12 @@
       "label": "Default sign",
       "description": "Whether to sign messages by default.",
       "default": true
+    },
+    "tryToFetchMissingKeys": {
+      "type": "boolean",
+      "label": "Try to fetch missing keys",
+      "description": "Whether to attempt fetching missing public keys from keys.openpgp.org for recipients. The server could know to which adresses you sent mail, so this option could be a privacy concern.",
+      "default": true
     }
   },
   "locales": {
