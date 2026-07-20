@@ -12,6 +12,7 @@ import {emailsOf, bytesArrayBuffer} from '../util.ts';
 import { INTENT_KEY, settings} from '../shared.ts';
 import { isCapable } from '../index.tsx';
 import { fetchKeyFromBackground } from '../pgp/session-broadcast.ts';
+import { recipientKeysFor } from '../pgp/key-utils.ts';
 
 
 export interface ComposeAttachment {
@@ -51,18 +52,6 @@ export interface ComposeRequest {
     recs.find((r) => r.email === lower) ||
     undefined
   );
-}
-
-export async function recipientKeysFor(emails:any) {
-  const certs = await listPublicCerts();
-  const found = [];
-  const missing = [];
-  for (const email of emails) {
-    const c = certs.find((pc) => pc.email.toLowerCase() === email.toLowerCase());
-    if (c) found.push(c.publicKey); // Utilise .publicKey au lieu de .certificate
-    else missing.push(email);
-  }
-  return { found, missing };
 }
   
 async function blobToBytes(blob: Blob): Promise<Uint8Array> {

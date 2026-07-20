@@ -10,11 +10,12 @@ import host from '@plugin-host';
 import { base64ToBuffer, bufferToBase64 } from "./util.ts";
 
 const DB_NAME = 'pgp-plugin-store';
-const DB_VERSION = 3;
+const DB_VERSION = 4;
 const KEY_RECORDS_STORE = 'key-records';
 const PUBLIC_CERTS_STORE = 'public-certs';
 const SESSION_KEYS_STORE = 'session-keys';
 const MESSAGE_CACHE_STORE = 'message-cache';
+const RECIPIENTS_STORE = 'recipients'; 
 
 // ── Interfaces ──────────────────────────────────────
 
@@ -78,6 +79,11 @@ export interface EncryptedMessageCache {
 export interface DecryptedCachePayload {
   preview: string;
   tokens: string[];
+}
+
+export interface Recipient {
+  email: string;
+  hasNotPublicKey: boolean;
 }
 
 // ── BDD ENGINE ───────────────────────────────────────
@@ -253,6 +259,20 @@ export async function clearAllMessageCache(): Promise<void> {
   const db = await openDB();
   await txPromise<undefined>(db, MESSAGE_CACHE_STORE, 'readwrite', (s) => s.clear());
 }
+
+//------------------ Recipient Store -----------------------------
+
+export async function saveRecipient(recipient: Recipient): Promise<void> {
+  const db = await openDB();
+  await txPromise<IDBValidKey>(db, RECIPIENTS_STORE, 'readwrite', (s) => s.put(recipient));
+}
+
+export async function getRecipient(email: string): Promise<Recipient | undefined> {
+  const db = await openDB();
+  return txPromise<Recipient | undefined>(db, RECIPIENTS_STORE, 'readonly', (s) => s.get(email));
+}
+
+//------------------ Export / Import Plugin Data -----------------------------
 
 export async function exportPluginData(): Promise<void> {
   try {

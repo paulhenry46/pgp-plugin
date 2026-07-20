@@ -6,6 +6,7 @@
 import * as openpgp from 'openpgp';
 import host from '@plugin-host';
 import { importOpenPgpPublicKey } from './import.ts';
+import { listPublicCerts } from '../storage.ts';
 // ── Helpers & Conversions ───────────────────────────────────────────
 
 /**
@@ -275,4 +276,16 @@ export async function deriveSecret(aesKey: CryptoKey, salt:string): Promise<stri
   const uint8Array = new Uint8Array(ciphertext);
   const binaryString = Array.from(uint8Array, byte => String.fromCharCode(byte)).join('');
   return btoa(binaryString);
+}
+
+export async function recipientKeysFor(emails:any) {
+  const certs = await listPublicCerts();
+  const found = [];
+  const missing = [];
+  for (const email of emails) {
+    const c = certs.find((pc) => pc.email.toLowerCase() === email.toLowerCase());
+    if (c) found.push(c.publicKey); // Utilise .publicKey au lieu de .certificate
+    else missing.push(email);
+  }
+  return { found, missing };
 }

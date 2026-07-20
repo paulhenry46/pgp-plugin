@@ -17,6 +17,7 @@ import { onEmailListItemRender } from './hooks/onEmailListRender.ts';
 import { onSearchResults } from './hooks/onSearchresults.ts';
 import { onEmailsFetched } from './hooks/onEmailsFetched.ts';
 import { askForDefaultKeyPass } from './hooks/activate.ts';
+import { onRecipientChipsChange } from './hooks/onRecipientChipsChange.ts';
 
 
 // ─── Privileged-tier capability probe ─────────────────────────────────
@@ -59,6 +60,7 @@ export const hooks = {
   onEmailListItemRender,
   onSearchResults,
   onEmailsFetched,
+  onRecipientChipsChange,
  /*  async onAfterLogout() {
     if (settings().lockOnLogout === false) return;
     try { await clearSessionKeys(); } catch (err) { host.log.warn('clearSessionKeys failed', err); }

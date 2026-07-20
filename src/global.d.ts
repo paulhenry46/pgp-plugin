@@ -48,6 +48,7 @@ declare module '@plugin-host' {
       encryptDrafts?: boolean;
       askForDefaultKeyPassOnActivated?: boolean;
       alwaysSendPubKey?: boolean;
+      tryToFetchMissingKeys?: boolean;
     };
   } | undefined;
 }
