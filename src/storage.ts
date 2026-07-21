@@ -290,6 +290,7 @@ export async function exportPluginData(): Promise<void> {
       encryptedPrivateKey: bufferToBase64(key.encryptedPrivateKey),
       salt: bufferToBase64(key.salt),
       iv: bufferToBase64(key.iv),
+      aesSalt: bufferToBase64(key.aesSalt),
       webauthn: key.webauthn ? {
         credentialId: bufferToBase64(key.webauthn.credentialId),
         encryptedPassphrase: bufferToBase64(key.webauthn.encryptedPassphrase),
@@ -340,6 +341,7 @@ export async function importPluginData(jsonContent: string): Promise<void> {
         encryptedPrivateKey: base64ToBuffer(key.encryptedPrivateKey) as ArrayBuffer,
         salt: base64ToBuffer(key.salt) as ArrayBuffer,
         iv: base64ToBuffer(key.iv) as ArrayBuffer,
+        aesSalt: base64ToBuffer(key.aesSalt) as ArrayBuffer,
         webauthn: key.webauthn ? {
           credentialId: base64ToBuffer(key.webauthn.credentialId) as ArrayBuffer,
           encryptedPassphrase: base64ToBuffer(key.webauthn.encryptedPassphrase) as ArrayBuffer,
