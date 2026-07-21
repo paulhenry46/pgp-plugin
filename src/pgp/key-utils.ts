@@ -278,14 +278,24 @@ export async function deriveSecret(aesKey: CryptoKey, salt:string): Promise<stri
   return btoa(binaryString);
 }
 
-export async function recipientKeysFor(emails:any) {
+export async function recipientKeysFor(emails: string[]): Promise<{
+  found: Record<string, string>;
+  missing: string[];
+}> {
   const certs = await listPublicCerts();
-  const found = [];
-  const missing = [];
+  const found: Record<string, string> = {};
+  const missing: string[] = [];
+
   for (const email of emails) {
-    const c = certs.find((pc) => pc.email.toLowerCase() === email.toLowerCase());
-    if (c) found.push(c.publicKey); // Utilise .publicKey au lieu de .certificate
-    else missing.push(email);
+    const emailLower = email.toLowerCase();
+    const c = certs.find((pc) => pc.email.toLowerCase() === emailLower);
+
+    if (c && c.publicKey) {
+      found[email] = c.publicKey;
+    } else {
+      missing.push(email);
+    }
   }
+
   return { found, missing };
 }

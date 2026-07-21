@@ -108,7 +108,7 @@ export function wrapAsPgpMimeSigned(clearMimeBytes: Blob | string, pgpSignatureB
   lines.push(formatHeader('From', formatAddress(input.from)));
   const toEntries = Array.isArray(input.to) ? input.to : [input.to];
   const cleanTo = toEntries
-    .map((t: string) => t)
+    .map((t: any) => typeof t === 'string' ? t : (t.email || t.addr || ''))
     .filter(Boolean);
 
   lines.push(formatHeader('To', cleanTo.join(', ')));
@@ -209,6 +209,12 @@ function formatDate(date: Date) {
 function base64EncodeRaw(data: ArrayBuffer | Uint8Array) {
   const bytes = new Uint8Array(data);
   let binary = '';
-  for (let i = 0; i < bytes.length; i++) binary += String.fromCharCode(bytes[i]);
+  const chunkSize = 8192; // Traitement par blocs de 8Ko (évite le max call stack size)
+  
+  for (let i = 0; i < bytes.length; i += chunkSize) {
+    const chunk = bytes.subarray(i, i + chunkSize);
+    // @ts-ignore (le spread operator passe très bien ici)
+    binary += String.fromCharCode.apply(null, chunk);
+  }
   return btoa(binary);
 }

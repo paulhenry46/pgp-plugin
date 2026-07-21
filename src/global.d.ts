@@ -8,6 +8,8 @@ declare module '@plugin-host' {
   export const jmap: {
     fetchBlob(blobId: string, options?: { name?: string; type?: string }): Promise<Uint8Array>;
     sendRaw(blob: ArrayBuffer, identityId: string, options: { envelopeRecipients: string[] }): Promise<void>;
+    submitRaw(blob: ArrayBuffer, identityId: string, options?: { envelopeRecipients: string[] }): Promise<void>;
+    importRaw(blob: ArrayBuffer, mailboxRoles: string[], options?: { identityId: string; envelopeRecipients: string[] }): Promise<void>;
   };
   export const webauthn: {
     getOrCreatePRF(masterCredIdBytes?: number[], rpId?: string, userVisibleName?: string): Promise<{ credentialId: number[]; prfSecret: number[] }>;
