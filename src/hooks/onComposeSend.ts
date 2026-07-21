@@ -216,14 +216,51 @@ export async function onComposeSend(req: ComposeRequest): Promise<boolean | unde
     }
     
     // --- SCÉNARIO B : Mixte (Certains destinataires PGP, d'autres non-PGP) ---
-    // --- SCÉNARIO B : Mixte (Certains destinataires PGP, d'autres non-PGP) ---
     else if (encrypt && pgpRecipients.length > 0 && nonPgpRecipients.length > 0) {
+      const clearReferences = req.references 
+        ? `${req.references} ${messageId}` 
+        : messageId;
 
-      // On dérive un Message-ID dédié pour le flux en clair
-      // Cela évite que le serveur SMTP/JMAP ne fusionne ou déduplique les deux soumissions
       const clearMessageId = messageId.replace('@', '-clear@');
 
-      // B.1 : Enveloppe PGP (Envoyée UNIQUEMENT aux destinataires PGP)
+      // Helper ultra-robuste pour extraire proprement l'adresse email d'un destinataire
+      const getAddrString = (item: any): string => {
+        if (!item) return '';
+        if (typeof item === 'string') return item;
+        return item.addr || item.email || item.address || item.mailbox || '';
+      };
+
+      // Helper pour filtrer la liste des destinataires selon une liste d'emails autorisés
+      const filterRecipients = (list: any, allowedEmails: string[]) => {
+        if (!list) return [];
+        const entries = Array.isArray(list) ? list : [list];
+        const normalizedAllowed = allowedEmails.map(e => e.toLowerCase().trim());
+
+        return entries.filter((item: any) => {
+          const addr = getAddrString(item);
+          return normalizedAllowed.includes(addr.toLowerCase().trim());
+        });
+      };
+
+      // 1. Filtrage initial
+      let pgpTo = filterRecipients(req.to, pgpRecipients);
+      let pgpCc = filterRecipients(req.cc, pgpRecipients);
+
+      let nonPgpTo = filterRecipients(req.to, nonPgpRecipients);
+      let nonPgpCc = filterRecipients(req.cc, nonPgpRecipients);
+
+      // 2. Garants RFC 5322 : Secours si 'To' est vide après filtrage
+      if (pgpTo.length === 0) {
+        pgpTo = pgpCc.length > 0 ? pgpCc : pgpRecipients;
+        if (pgpCc.length > 0) pgpCc = [];
+      }
+
+      if (nonPgpTo.length === 0) {
+        nonPgpTo = nonPgpCc.length > 0 ? nonPgpCc : nonPgpRecipients;
+        if (nonPgpCc.length > 0) nonPgpCc = [];
+      }
+
+      // B.1 : Enveloppe PGP (Adressée UNIQUEMENT aux destinataires PGP)
       const encryptedBlob = await pgpEncrypt(
         clearMimeBytes,
         Object.values(foundKeys),
@@ -233,15 +270,15 @@ export async function onComposeSend(req: ComposeRequest): Promise<boolean | unde
 
       const pgpEnvelopeBlob = wrapAsPgpMimeEncrypted(encryptedBlob, {
         from, 
-        to: req.to, 
-        cc: req.cc, 
+        to: pgpTo, 
+        cc: pgpCc, 
         subject: req.subject || '', 
         inReplyTo: req.inReplyTo, 
         references: req.references, 
-        messageId // ID principal pour le chiffré
+        messageId
       });
 
-      // B.2 : Enveloppe en clair / signée (Envoyée UNIQUEMENT aux destinataires non-PGP)
+      // B.2 : Enveloppe en clair / signée (Adressée UNIQUEMENT aux destinataires non-PGP)
       let clearEnvelopeBlob: Blob;
 
       if (sign && signingKeyForPgp) {
@@ -249,24 +286,23 @@ export async function onComposeSend(req: ComposeRequest): Promise<boolean | unde
         const clearMimeBytesBlob = new Blob([clearMimeBytes.slice().buffer], { type: 'application/octet-stream' });
         clearEnvelopeBlob = wrapAsPgpMimeSigned(clearMimeBytesBlob, signatureBlob, {
           from, 
-          to: req.to, 
-          cc: req.cc, 
+          to: nonPgpTo, 
+          cc: nonPgpCc, 
           subject: req.subject || '', 
           inReplyTo: req.inReplyTo, 
-          references: req.references, 
-          messageId: clearMessageId // ID distinct pour la version claire
+          references: [clearReferences], 
+          messageId: clearMessageId,
         });
       } else {
-        // Version clair sans signature
         const clearMimeWithClearID = buildMimeMessage({
           from,
-          to: req.to,
-          cc: req.cc,
+          to: nonPgpTo,
+          cc: nonPgpCc,
           subject: req.subject || '',
           textBody: req.textBody || req.text || '',
           htmlBody: req.htmlBody || req.html || '',
           inReplyTo: req.inReplyTo,
-          references: req.references,
+          references: [clearReferences],
           attachments,
           messageId: clearMessageId
         });
@@ -276,12 +312,23 @@ export async function onComposeSend(req: ComposeRequest): Promise<boolean | unde
       const pgpBytes = await blobToBytes(pgpEnvelopeBlob);
       const clearBytes = await blobToBytes(clearEnvelopeBlob);
 
-      // B.3 : Envois réseau séparés avec attente (pour éviter le race condition sur le serveur)
+      // B.3 : Envois réseau ciblés
       await host.jmap.submitRaw(bytesArrayBuffer(pgpBytes), identityId, { envelopeRecipients: pgpRecipients });
+
       await host.jmap.submitRaw(bytesArrayBuffer(clearBytes), identityId, { envelopeRecipients: nonPgpRecipients });
 
-      // B.4 : Stockage dans le dossier "Sent" (Version chiffrée uniquement)
-      await host.jmap.importRaw(bytesArrayBuffer(pgpBytes), ['sent']);
+      // B.4 : Stockage dans "Sent" (Version chiffrée avec la liste originale complète)
+      const sentEnvelopeBlob = wrapAsPgpMimeEncrypted(encryptedBlob, {
+        from, 
+        to: req.to, 
+        cc: req.cc, 
+        subject: req.subject || '', 
+        inReplyTo: req.inReplyTo, 
+        references: req.references, 
+        messageId
+      });
+      const sentBytes = await blobToBytes(sentEnvelopeBlob);
+      await host.jmap.importRaw(bytesArrayBuffer(sentBytes), ['sent']);
     }
 
     // --- SCÉNARIO C : 0% PGP / Signature seule (Zero-Knowledge dans Sent) ---
