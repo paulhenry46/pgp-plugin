@@ -33,7 +33,7 @@ For more details, refers to [DOCS.md](DOCS.md) file.
 ## Roadmap (Planned Features)
 
 - [x] **Dynamic Recipient Badges:** Real-time check during drafting to see if `To/Cc/Bcc` addresses have valid public keys, displaying a visual badge next to them. Available in next release
-- [ ] **Smart Encryption Fallback:** If some recipients lack PGP keys, prompt the user before sending two separate emails with the same Message-ID (one encrypted to PGP-capable recipients, and one in cleartext to those without keys).
+- [x] **Smart Encryption Fallback:** If some recipients lack PGP keys, prompt the user before sending two separate emails with the same Message-ID (one encrypted to PGP-capable recipients, and one in cleartext to those without keys). Available in next release
 - [ ] **Address Book Integration:** Native integration of public keys within the Bulwark contact/address book.
 - [ ] **Server vs. E2E Badges:** Display a dedicated badge in the email list row to distinguish between E2E encrypted emails and those encrypted server-side (requires a new hook and Stalwart Server modifications). If you want to get this feature, show your interest here : https://support.stalw.art/t/add-an-explicit-server-encryption-marker-header-for-at-rest-encrypted-messages/1139 because now, we can't know if the mail is E2E encrypted or just stored encrypted.
 - [ ] **Instant Index Boot:** Automatically fetch the local storage search index upon key decryption startup without requiring a page reload (requires a new plugin hook like `rerenderEmailBody`).

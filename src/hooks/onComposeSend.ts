@@ -220,6 +220,17 @@ export async function onComposeSend(req: ComposeRequest): Promise<boolean | unde
     
     // --- SCENARIO B: Mixed (Some PGP recipients, some non-PGP) ---
     else if (encrypt && pgpRecipients.length > 0 && nonPgpRecipients.length > 0) {
+      const continueSending = await host.ui.confirm({
+        title: host.i18n.t('confirm.mixed_recipients_title'),
+        message: host.i18n.t('confirm.mixed_recipients_message'),
+        danger: true,
+        confirmLabel: host.i18n.t('confirm.mixed_recipients_confirm'),
+      });
+
+      if (!continueSending) {
+        return false;
+      }
+      
       const clearReferences = req.references 
         ? `${req.references} ${messageId}` 
         : messageId;
