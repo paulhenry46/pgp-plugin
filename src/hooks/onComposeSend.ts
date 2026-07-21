@@ -109,7 +109,7 @@ export async function onComposeSend(req: ComposeRequest): Promise<boolean | unde
 
     if (!identityId) throw new Error(host.i18n.t('error.no_identity'));
 
-    const from = {addr: req.fromEmail, name: req.fromName};
+    const from = { addr: req.fromEmail, name: req.fromName };
 
     if (!from.addr) throw new Error(host.i18n.t('error.no_sender_address'));
 
@@ -134,7 +134,7 @@ export async function onComposeSend(req: ComposeRequest): Promise<boolean | unde
 
     const currentKeyRecord = keyRecord as KeyRecord;
 
-    // 1. Détection des clés publiques pour les destinataires
+    // 1. Détection des clés publiques pour les destinataires (To, Cc, Bcc confondus)
     let pgpRecipients: string[] = [];
     let nonPgpRecipients: string[] = [];
     let foundKeys: Record<string, string> = {};
@@ -171,6 +171,7 @@ export async function onComposeSend(req: ComposeRequest): Promise<boolean | unde
       });
     }
 
+    // Note : On ne transmet PAS req.bcc à buildMimeMessage pour éviter que l'en-tête Bcc reste visible dans le corps MIME
     const clearMimeBytes = buildMimeMessage({
       from,
       to: req.to,
@@ -207,11 +208,13 @@ export async function onComposeSend(req: ComposeRequest): Promise<boolean | unde
         signingKeyForPgp
       );
 
+      // On omet Bcc des en-têtes MIME pour préserver la confidentialité
       const finalEnvelopeBlob = wrapAsPgpMimeEncrypted(encryptedBlob, {
         from, to: req.to, cc: req.cc, subject: req.subject || '', inReplyTo: req.inReplyTo, references: req.references, messageId
       });
 
       const rawBytes = await blobToBytes(finalEnvelopeBlob);
+      // allRecipientEmails contient bien TOUS les emails (To + Cc + Bcc) pour la livraison SMTP/JMAP
       await host.jmap.sendRaw(bytesArrayBuffer(rawBytes), identityId, { envelopeRecipients: allRecipientEmails });
     }
     
@@ -223,14 +226,14 @@ export async function onComposeSend(req: ComposeRequest): Promise<boolean | unde
 
       const clearMessageId = messageId.replace('@', '-clear@');
 
-      // Helper ultra-robuste pour extraire proprement l'adresse email d'un destinataire
+      // Helper pour extraire l'adresse email
       const getAddrString = (item: any): string => {
         if (!item) return '';
         if (typeof item === 'string') return item;
         return item.addr || item.email || item.address || item.mailbox || '';
       };
 
-      // Helper pour filtrer la liste des destinataires selon une liste d'emails autorisés
+      // Helper de filtrage
       const filterRecipients = (list: any, allowedEmails: string[]) => {
         if (!list) return [];
         const entries = Array.isArray(list) ? list : [list];
@@ -242,25 +245,41 @@ export async function onComposeSend(req: ComposeRequest): Promise<boolean | unde
         });
       };
 
-      // 1. Filtrage initial
+      // 1. Filtrage initial des destinataires PGP et Non-PGP
       let pgpTo = filterRecipients(req.to, pgpRecipients);
       let pgpCc = filterRecipients(req.cc, pgpRecipients);
+      let pgpBcc = filterRecipients(req.bcc, pgpRecipients);
 
       let nonPgpTo = filterRecipients(req.to, nonPgpRecipients);
       let nonPgpCc = filterRecipients(req.cc, nonPgpRecipients);
+      let nonPgpBcc = filterRecipients(req.bcc, nonPgpRecipients);
 
       // 2. Garants RFC 5322 : Secours si 'To' est vide après filtrage
       if (pgpTo.length === 0) {
-        pgpTo = pgpCc.length > 0 ? pgpCc : pgpRecipients;
+        pgpTo = pgpCc.length > 0 ? pgpCc : (pgpBcc.length > 0 ? pgpBcc : pgpRecipients);
         if (pgpCc.length > 0) pgpCc = [];
       }
 
       if (nonPgpTo.length === 0) {
-        nonPgpTo = nonPgpCc.length > 0 ? nonPgpCc : nonPgpRecipients;
+        nonPgpTo = nonPgpCc.length > 0 ? nonPgpCc : (nonPgpBcc.length > 0 ? nonPgpBcc : nonPgpRecipients);
         if (nonPgpCc.length > 0) nonPgpCc = [];
       }
 
-      // B.1 : Enveloppe PGP (Adressée UNIQUEMENT aux destinataires PGP)
+      // Construction du tableau global des destinataires d'enveloppe PGP (To + Cc + Bcc)
+      const pgpEnvelopeRecipients = [
+        ...emailsOf(pgpTo),
+        ...emailsOf(pgpCc),
+        ...emailsOf(pgpBcc)
+      ];
+
+      // Construction du tableau global des destinataires d'enveloppe Non-PGP (To + Cc + Bcc)
+      const nonPgpEnvelopeRecipients = [
+        ...emailsOf(nonPgpTo),
+        ...emailsOf(nonPgpCc),
+        ...emailsOf(nonPgpBcc)
+      ];
+
+      // B.1 : Enveloppe PGP (Sans inclure Bcc dans les en-têtes visibles)
       const encryptedBlob = await pgpEncrypt(
         clearMimeBytes,
         Object.values(foundKeys),
@@ -278,7 +297,7 @@ export async function onComposeSend(req: ComposeRequest): Promise<boolean | unde
         messageId
       });
 
-      // B.2 : Enveloppe en clair / signée (Adressée UNIQUEMENT aux destinataires non-PGP)
+      // B.2 : Enveloppe en clair / signée (Sans inclure Bcc dans les en-têtes visibles)
       let clearEnvelopeBlob: Blob;
 
       if (sign && signingKeyForPgp) {
@@ -312,16 +331,17 @@ export async function onComposeSend(req: ComposeRequest): Promise<boolean | unde
       const pgpBytes = await blobToBytes(pgpEnvelopeBlob);
       const clearBytes = await blobToBytes(clearEnvelopeBlob);
 
-      // B.3 : Envois réseau ciblés
-      await host.jmap.submitRaw(bytesArrayBuffer(pgpBytes), identityId, { envelopeRecipients: pgpRecipients });
+      // B.3 : Envois réseau ciblés (en passant la liste complète d'enveloppe incluant Bcc)
+      await host.jmap.submitRaw(bytesArrayBuffer(pgpBytes), identityId, { envelopeRecipients: pgpEnvelopeRecipients });
 
-      await host.jmap.submitRaw(bytesArrayBuffer(clearBytes), identityId, { envelopeRecipients: nonPgpRecipients });
+      await host.jmap.submitRaw(bytesArrayBuffer(clearBytes), identityId, { envelopeRecipients: nonPgpEnvelopeRecipients });
 
-      // B.4 : Stockage dans "Sent" (Version chiffrée avec la liste originale complète)
+      // B.4 : Stockage dans "Sent" (Pour vous, on conserve la copie chiffrée avec les destinataires originaux To/Cc/Bcc si désiré, ou sans Bcc)
       const sentEnvelopeBlob = wrapAsPgpMimeEncrypted(encryptedBlob, {
         from, 
         to: req.to, 
         cc: req.cc, 
+        bcc: req.bcc, // Optionnel : conservé dans 'Sent' pour que VOUS sachiez à qui vous l'avez envoyé
         subject: req.subject || '', 
         inReplyTo: req.inReplyTo, 
         references: req.references, 
@@ -355,13 +375,13 @@ export async function onComposeSend(req: ComposeRequest): Promise<boolean | unde
       );
 
       const sentEnvelopeBlob = wrapAsPgpMimeEncrypted(encryptedForSelfBlob, {
-        from, to: req.to, cc: req.cc, subject: req.subject || '', inReplyTo: req.inReplyTo, references: req.references, messageId
+        from, to: req.to, cc: req.cc, bcc: req.bcc, subject: req.subject || '', inReplyTo: req.inReplyTo, references: req.references, messageId
       });
 
       const networkBytes = await blobToBytes(networkEnvelopeBlob);
       const sentBytes = await blobToBytes(sentEnvelopeBlob);
 
-      // C.3 : Envoi sur le réseau (sans archivage auto)
+      // C.3 : Envoi sur le réseau (allRecipientEmails distribue correctement aux To, Cc et Bcc)
       await host.jmap.submitRaw(bytesArrayBuffer(networkBytes), identityId, { envelopeRecipients: allRecipientEmails });
 
       // C.4 : Archivage de la version chiffrée dans le dossier "Sent"
