@@ -208,7 +208,9 @@
       "settings.error.json_export_failed": "JSON export failed: {message}",
       "confirm.mixed_recipients_title": "Mixed Recipients",
       "confirm.mixed_recipients_message": "Some recipients do not have PGP keys. Continue sending? It will break end-to-end encryption for those recipients. However, the message will still be encrypted for you and recipients with PGP keys.",
-      "confirm.mixed_recipients_confirm": "Continue"
+      "confirm.mixed_recipients_confirm": "Continue",
+      "banner.encrypted_label": "Encryption State",
+      "banner.sig_label": "Signature State"
     }
   }
 }

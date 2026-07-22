@@ -42,18 +42,19 @@ interface VerificationStatus {
 type Tone = 'ok' | 'warn' | 'error' | 'muted';
 type BannerRow = [string, Tone];
 
+// Assure-toi d'importer `h` (depuis Preact ou ton framework) selon ton environnement.
+
 export function EmailBanner(props: EmailProps) {
   const email = props && props.email;
   const emailId = email?.id;
 
-  const [status, setStatus] = useState<VerificationStatus | null>({isEncrypted: false});
+  const [status, setStatus] = useState<VerificationStatus | null>({ isEncrypted: false });
 
   useEffect(() => {
     let alive = true;
     let intervalId: number | null = null;
 
     const checkStorage = async () => {
-       
       if (!emailId || !alive) return;
 
       const s: VerificationStatus | null = await host.storage.get(VERIFY_PREFIX + emailId);
@@ -93,48 +94,141 @@ export function EmailBanner(props: EmailProps) {
 
   if (!emailId || !status) return null;
 
-  const rows: BannerRow[] = [];
+  // On enrichit la structure de chaque ligne avec un label et une icône
+  const rows: { labelText: string; fromText: string; tone: Tone; icon: string }[] = [];
  
   if (status.isEncrypted) {
-    if (status.decryptionSuccess) rows.push([ host.i18n.t('banner.decrypted_success'), 'ok']);
-    else if (status.decryptionError === 'locked') rows.push([ host.i18n.t('banner.encrypted_locked'), 'warn']);
-    else if (status.decryptionError) rows.push([ `${host.i18n.t('banner.encrypted_prefix')}${status.decryptionError}`, 'error']);
-    else if (status.decryptionError !== null) rows.push([ host.i18n.t('banner.processing'), 'muted']);
+    const labelText = host.i18n.t('banner.encrypted_label') || 'Chiffrement';
+    
+    if (status.decryptionSuccess) {
+      rows.push({ labelText, fromText: host.i18n.t('banner.decrypted_success'), tone: 'ok', icon: 'lock' });
+    } else if (status.decryptionError === 'locked') {
+      rows.push({ labelText, fromText: host.i18n.t('banner.encrypted_locked'), tone: 'warn', icon: 'lock' });
+    } else if (status.decryptionError) {
+      rows.push({ labelText: 'Erreur', fromText: `${host.i18n.t('banner.encrypted_prefix')}${status.decryptionError}`, tone: 'error', icon: 'alert' });
+    } else if (status.decryptionError !== null) {
+      rows.push({ labelText, fromText: host.i18n.t('banner.processing'), tone: 'muted', icon: 'clock' });
+    }
   }
   
   if (status.isSigned || status.signerCert) {
+    const labelText = host.i18n.t('banner.sig_label') || 'Signature';
+
     if (status.signatureValid) {
       const who = status.signerCert && status.signerCert.email ? `${host.i18n.t('banner.sig_by')}${status.signerCert.email}` : '';
       const mismatch = status.signerEmailMatch === false ? host.i18n.t('banner.sig_mismatch') : '';
       const ss =  status.selfSigned ? host.i18n.t('banner.sig_self_signed') : '';
-      rows.push([ `${host.i18n.t('banner.sig_valid')}${who}${ss}${mismatch}`, status.signerEmailMatch === false ? 'warn' : 'ok']);
+      
+      const tone = status.signerEmailMatch === false ? 'warn' : 'ok';
+      rows.push({ labelText, fromText: `${host.i18n.t('banner.sig_valid')}${who}${ss}${mismatch}`, tone, icon: 'shield-check' });
     } else if (status.signatureError) {
-      rows.push([ `${host.i18n.t('banner.sig_invalid_prefix')}${status.signatureError}`, 'error']);
+      rows.push({ labelText: 'Signature Invalide', fromText: `${host.i18n.t('banner.sig_invalid_prefix')}${status.signatureError}`, tone: 'error', icon: 'shield-alert' });
     } else {
-      rows.push([ host.i18n.t('banner.sig_unsigned_fallback'), 'muted']);
+      rows.push({ labelText, fromText: host.i18n.t('banner.sig_unsigned_fallback'), tone: 'muted', icon: 'shield' });
     }
   }
 
   if (rows.length === 0) return null;
 
-  const toneColor = (tone: Tone): string => 
-    tone === 'ok' ? 'var(--color-success, #16a34a)'
-    : tone === 'error' ? 'var(--color-destructive, #dc2626)'
+  const getThemeVars = (tone: Tone) => {
+    const baseColor = tone === 'ok' ? 'var(--color-success, #16a34a)'
+      : tone === 'error' ? 'var(--color-destructive, #dc2626)'
       : tone === 'warn' ? 'var(--color-warning, #d97706)'
-        : 'var(--color-muted-foreground, #64748b)';
+      : 'var(--color-muted-foreground, #64748b)';
+    
+    return {
+      color: baseColor,
+      bg: `color-mix(in srgb, ${baseColor} 12%, transparent)`,
+      border: `1px solid color-mix(in srgb, ${baseColor} 25%, transparent)`,
+      iconBg: `color-mix(in srgb, ${baseColor} 25%, transparent)`,
+    };
+  };
 
-  return h('div', { style: { display: 'flex', flexDirection: 'column', gap: '4px' } },
-    rows.map(([ text, tone], i) =>
-      h('div', {
+  const renderIcon = (icon: string) => {
+    const svgProps = {
+      viewBox: '0 0 24 24', width: '20', height: '20',
+      fill: 'none', stroke: 'currentColor', strokeWidth: '2',
+      strokeLinecap: 'round', strokeLinejoin: 'round'
+    };
+
+    if (icon === 'lock') {
+      return h('svg', svgProps, [
+        h('rect', { x: '3', y: '11', width: '18', height: '11', rx: '2', ry: '2', key: '1' }),
+        h('path', { d: 'M7 11V7a5 5 0 0 1 10 0v4', key: '2' })
+      ]);
+    }
+    if (icon === 'shield-check') {
+      return h('svg', svgProps, [
+        h('path', { d: 'M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z', key: '1' }),
+        h('path', { d: 'M9 12l2 2 4-4', key: '2' })
+      ]);
+    }
+    if (icon === 'shield-alert') {
+      return h('svg', svgProps, [
+        h('path', { d: 'M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z', key: '1' }),
+        h('line', { x1: '12', y1: '8', x2: '12', y2: '12', key: '2' }),
+        h('line', { x1: '12', y1: '16', x2: '12.01', y2: '16', key: '3' })
+      ]);
+    }
+    if (icon === 'alert') {
+      return h('svg', svgProps, [
+        h('path', { d: 'M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z', key: '1' }),
+        h('line', { x1: '12', y1: '9', x2: '12', y2: '13', key: '2' }),
+        h('line', { x1: '12', y1: '17', x2: '12.01', y2: '17', key: '3' })
+      ]);
+    }
+    // Default (clock / processing)
+    return h('svg', svgProps, [
+      h('circle', { cx: '12', cy: '12', r: '10', key: '1' }),
+      h('polyline', { points: '12 6 12 12 16 14', key: '2' })
+    ]);
+  };
+
+  return h('div', { style: { display: 'flex', flexDirection: 'column', gap: '8px' } },
+    rows.map(({ labelText, fromText, tone, icon }, i) => {
+      const theme = getThemeVars(tone);
+
+      return h('div', {
         key: i,
+        role: 'note',
+        title: fromText,
         style: {
-          display: 'flex', gap: '8px', alignItems: 'center',
-          padding: '6px 10px', fontSize: '13px',
-          border: `1px solid ${toneColor(tone)}`,
-          color: toneColor(tone),
+          display: 'flex',
+          alignItems: 'center',
+          gap: '12px',
+          padding: '10px 24px',
+          background: theme.bg,
+          borderBottom: theme.border,
+          color: 'var(--color-foreground)',
         },
-      },  h('span', null, text)),
-    ),
+      },
+        h('div', {
+          style: {
+            width: '40px', height: '40px', borderRadius: '9999px',
+            display: 'flex', alignItems: 'center', justifyContent: 'center',
+            flexShrink: 0,
+            background: theme.iconBg,
+            color: theme.color,
+          },
+          'aria-hidden': 'true',
+        },
+          renderIcon(icon)
+        ),
+        h('div', { style: { flex: 1, minWidth: 0, display: 'flex', flexDirection: 'column' } },
+          h('div', {
+            style: {
+              fontSize: '10px',
+              fontWeight: 600,
+              textTransform: 'uppercase',
+              letterSpacing: '0.05em',
+              opacity: 0.75,
+              color: theme.color,
+            },
+          }, labelText),
+          fromText ? h('div', { style: { fontSize: '14px', fontWeight: 600, lineHeight: 1.4 } }, fromText) : null
+        )
+      );
+    })
   );
 }
 
