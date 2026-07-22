@@ -33,6 +33,7 @@ export async function askForDefaultKeyPass(): Promise<void> {
         decryptionKey,
         aesKey: aesKey,
       });
+      host.ui.rerenderFetchedEmails();
     } catch (error) {
       throw new Error('Failed to unlock the default key: ' + (error instanceof Error ? error.message : String(error)));
     }

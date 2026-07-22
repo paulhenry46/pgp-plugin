@@ -40,6 +40,7 @@ declare module '@plugin-host' {
       }): Promise<Record<string, string> | null>;
       downloadFile: (opts: { content: string; filename: string; contentType?: string }) => Promise<void>;
       rerenderEmail(): void;
+      rerenderFetchedEmails(): void;
   };
   export const plugin: {
     settings?: {
