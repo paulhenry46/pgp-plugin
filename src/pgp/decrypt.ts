@@ -180,4 +180,5 @@ async function askForKeyAndRerender(keyRecordId: string, identity: string): Prom
             aesKey: aesKey,
           });
           host.ui.rerenderEmail();
+          host.ui.rerenderFetchedEmails();
         }
