@@ -42,7 +42,6 @@ interface VerificationStatus {
 type Tone = 'ok' | 'warn' | 'error' | 'muted';
 type BannerRow = [string, Tone];
 
-// Assure-toi d'importer `h` (depuis Preact ou ton framework) selon ton environnement.
 
 export function EmailBanner(props: EmailProps) {
   const email = props && props.email;
@@ -58,7 +57,6 @@ export function EmailBanner(props: EmailProps) {
       if (!emailId || !alive) return;
 
       const s: VerificationStatus | null = await host.storage.get(VERIFY_PREFIX + emailId);
-      
       if (!alive) return;
 
       if (s && !s.processing) {
@@ -74,11 +72,8 @@ export function EmailBanner(props: EmailProps) {
         const ctStr = Array.isArray(ct) ? ct[0] : (ct as string | undefined);
         
         let fallback: VerificationStatus | null = null;
-        if (ctStr && ctStr.includes('multipart/encrypted')) {
-          fallback = { isEncrypted: true };
-        } else if (ctStr && ctStr.includes('multipart/signed')) {
-          fallback = { isSigned: true };
-        }
+        if (ctStr && ctStr.includes('multipart/encrypted')) fallback = { isEncrypted: true };
+        else if (ctStr && ctStr.includes('multipart/signed')) fallback = { isSigned: true };
         setStatus(fallback);
       }
     };
@@ -94,141 +89,151 @@ export function EmailBanner(props: EmailProps) {
 
   if (!emailId || !status) return null;
 
-  // On enrichit la structure de chaque ligne avec un label et une icône
-  const rows: { labelText: string; fromText: string; tone: Tone; icon: string }[] = [];
- 
+  let encText = '';
+  let encTone: Tone = 'muted';
   if (status.isEncrypted) {
-    const labelText = host.i18n.t('banner.encrypted_label') || 'Chiffrement';
-    
     if (status.decryptionSuccess) {
-      rows.push({ labelText, fromText: host.i18n.t('banner.decrypted_success'), tone: 'ok', icon: 'lock' });
+      encText = host.i18n.t('banner.decrypted_success');
+      encTone = 'ok';
     } else if (status.decryptionError === 'locked') {
-      rows.push({ labelText, fromText: host.i18n.t('banner.encrypted_locked'), tone: 'warn', icon: 'lock' });
+      encText = host.i18n.t('banner.encrypted_locked');
+      encTone = 'warn';
     } else if (status.decryptionError) {
-      rows.push({ labelText: 'Erreur', fromText: `${host.i18n.t('banner.encrypted_prefix')}${status.decryptionError}`, tone: 'error', icon: 'alert' });
-    } else if (status.decryptionError !== null) {
-      rows.push({ labelText, fromText: host.i18n.t('banner.processing'), tone: 'muted', icon: 'clock' });
+      encText = `${host.i18n.t('banner.encrypted_prefix')}${status.decryptionError}`;
+      encTone = 'error';
+    } else {
+      encText = host.i18n.t('banner.processing');
+      encTone = 'muted';
     }
   }
-  
-  if (status.isSigned || status.signerCert) {
-    const labelText = host.i18n.t('banner.sig_label') || 'Signature';
 
+  let sigText = '';
+  let sigTone: Tone = 'muted';
+  if (status.isSigned || status.signerCert) {
     if (status.signatureValid) {
       const who = status.signerCert && status.signerCert.email ? `${host.i18n.t('banner.sig_by')}${status.signerCert.email}` : '';
       const mismatch = status.signerEmailMatch === false ? host.i18n.t('banner.sig_mismatch') : '';
-      const ss =  status.selfSigned ? host.i18n.t('banner.sig_self_signed') : '';
+      const ss = status.selfSigned ? host.i18n.t('banner.sig_self_signed') : '';
       
-      const tone = status.signerEmailMatch === false ? 'warn' : 'ok';
-      rows.push({ labelText, fromText: `${host.i18n.t('banner.sig_valid')}${who}${ss}${mismatch}`, tone, icon: 'shield-check' });
+      sigText = `${host.i18n.t('banner.sig_valid')}${who}${ss}${mismatch}`;
+      sigTone = status.signerEmailMatch === false ? 'warn' : 'ok';
     } else if (status.signatureError) {
-      rows.push({ labelText: 'Signature Invalide', fromText: `${host.i18n.t('banner.sig_invalid_prefix')}${status.signatureError}`, tone: 'error', icon: 'shield-alert' });
+      sigText = `${host.i18n.t('banner.sig_invalid_prefix')}${status.signatureError}`;
+      sigTone = 'error';
     } else {
-      rows.push({ labelText, fromText: host.i18n.t('banner.sig_unsigned_fallback'), tone: 'muted', icon: 'shield' });
+      sigText = host.i18n.t('banner.sig_unsigned_fallback');
+      sigTone = 'muted';
     }
   }
 
-  if (rows.length === 0) return null;
+  if (!encText && !sigText) return null;
 
-  const getThemeVars = (tone: Tone) => {
-    const baseColor = tone === 'ok' ? 'var(--color-success, #16a34a)'
-      : tone === 'error' ? 'var(--color-destructive, #dc2626)'
-      : tone === 'warn' ? 'var(--color-warning, #d97706)'
-      : 'var(--color-muted-foreground, #64748b)';
-    
-    return {
-      color: baseColor,
-      bg: `color-mix(in srgb, ${baseColor} 12%, transparent)`,
-      border: `1px solid color-mix(in srgb, ${baseColor} 25%, transparent)`,
-      iconBg: `color-mix(in srgb, ${baseColor} 25%, transparent)`,
-    };
+  const tones = [encTone, sigTone];
+  const globalTone: Tone = tones.includes('error') ? 'error'
+    : tones.includes('warn') ? 'warn'
+    : tones.includes('ok') ? 'ok'
+    : 'muted';
+
+  let labelText = host.i18n.t('banner.title_security');
+  if (encText && sigText) labelText = host.i18n.t('banner.title_both');
+  else if (encText) labelText = host.i18n.t('banner.title_encrypted');
+  else if (sigText) labelText = host.i18n.t('banner.title_signed');
+
+  const baseColor = globalTone === 'ok' ? 'var(--color-success, #16a34a)'
+    : globalTone === 'error' ? 'var(--color-destructive, #dc2626)'
+    : globalTone === 'warn' ? 'var(--color-warning, #d97706)'
+    : 'var(--color-muted-foreground, #64748b)';
+
+  const theme = {
+    color: baseColor,
+    bg: `color-mix(in srgb, ${baseColor} 12%, transparent)`,
+    border: `1px solid color-mix(in srgb, ${baseColor} 25%, transparent)`,
+    iconBg: `color-mix(in srgb, ${baseColor} 25%, transparent)`,
   };
 
-  const renderIcon = (icon: string) => {
+  const renderIcon = () => {
     const svgProps = {
       viewBox: '0 0 24 24', width: '20', height: '20',
       fill: 'none', stroke: 'currentColor', strokeWidth: '2',
       strokeLinecap: 'round', strokeLinejoin: 'round'
     };
 
-    if (icon === 'lock') {
-      return h('svg', svgProps, [
-        h('rect', { x: '3', y: '11', width: '18', height: '11', rx: '2', ry: '2', key: '1' }),
-        h('path', { d: 'M7 11V7a5 5 0 0 1 10 0v4', key: '2' })
-      ]);
-    }
-    if (icon === 'shield-check') {
-      return h('svg', svgProps, [
-        h('path', { d: 'M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z', key: '1' }),
-        h('path', { d: 'M9 12l2 2 4-4', key: '2' })
-      ]);
-    }
-    if (icon === 'shield-alert') {
+    if (globalTone === 'error') {
       return h('svg', svgProps, [
         h('path', { d: 'M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z', key: '1' }),
         h('line', { x1: '12', y1: '8', x2: '12', y2: '12', key: '2' }),
         h('line', { x1: '12', y1: '16', x2: '12.01', y2: '16', key: '3' })
       ]);
     }
-    if (icon === 'alert') {
+
+    if (encText && sigText) {
       return h('svg', svgProps, [
-        h('path', { d: 'M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z', key: '1' }),
-        h('line', { x1: '12', y1: '9', x2: '12', y2: '13', key: '2' }),
-        h('line', { x1: '12', y1: '17', x2: '12.01', y2: '17', key: '3' })
+        h('path', { d: 'M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z', key: '1' }),
+        h('rect', { x: '9', y: '11', width: '6', height: '5', rx: '1', key: '2' }),
+        h('path', { d: 'M10 11V9a2 2 0 0 1 4 0v2', key: '3' })
       ]);
     }
-    // Default (clock / processing)
+
+    if (encText) {
+      return h('svg', svgProps, [
+        h('rect', { x: '3', y: '11', width: '18', height: '11', rx: '2', ry: '2', key: '1' }),
+        h('path', { d: 'M7 11V7a5 5 0 0 1 10 0v4', key: '2' })
+      ]);
+    }
+
     return h('svg', svgProps, [
-      h('circle', { cx: '12', cy: '12', r: '10', key: '1' }),
-      h('polyline', { points: '12 6 12 12 16 14', key: '2' })
+      h('path', { d: 'M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z', key: '1' }),
+      h('path', { d: 'M9 12l2 2 4-4', key: '2' })
     ]);
   };
 
-  return h('div', { style: { display: 'flex', flexDirection: 'column', gap: '8px' } },
-    rows.map(({ labelText, fromText, tone, icon }, i) => {
-      const theme = getThemeVars(tone);
-
-      return h('div', {
-        key: i,
-        role: 'note',
-        title: fromText,
-        style: {
-          display: 'flex',
-          alignItems: 'center',
-          gap: '12px',
-          padding: '10px 24px',
-          background: theme.bg,
-          borderBottom: theme.border,
-          color: 'var(--color-foreground)',
-        },
+  return h('div', {
+    role: 'note',
+    style: {
+      display: 'flex',
+      alignItems: 'center',
+      gap: '12px',
+      padding: '10px 24px',
+      background: theme.bg,
+      borderBottom: theme.border,
+      color: 'var(--color-foreground)',
+    },
+  },
+    h('div', {
+      style: {
+        width: '40px', height: '40px', borderRadius: '9999px',
+        display: 'flex', alignItems: 'center', justifyContent: 'center',
+        flexShrink: 0,
+        background: theme.iconBg,
+        color: theme.color,
       },
-        h('div', {
-          style: {
-            width: '40px', height: '40px', borderRadius: '9999px',
-            display: 'flex', alignItems: 'center', justifyContent: 'center',
-            flexShrink: 0,
-            background: theme.iconBg,
-            color: theme.color,
-          },
-          'aria-hidden': 'true',
+      'aria-hidden': 'true',
+    }, renderIcon()),
+
+    h('div', { style: { flex: 1, minWidth: 0, display: 'flex', flexDirection: 'column', gap: '2px' } },
+      h('div', {
+        style: {
+          fontSize: '10px',
+          fontWeight: 700,
+          textTransform: 'uppercase',
+          letterSpacing: '0.05em',
+          color: theme.color,
         },
-          renderIcon(icon)
-        ),
-        h('div', { style: { flex: 1, minWidth: 0, display: 'flex', flexDirection: 'column' } },
-          h('div', {
-            style: {
-              fontSize: '10px',
-              fontWeight: 600,
-              textTransform: 'uppercase',
-              letterSpacing: '0.05em',
-              opacity: 0.75,
-              color: theme.color,
-            },
-          }, labelText),
-          fromText ? h('div', { style: { fontSize: '14px', fontWeight: 600, lineHeight: 1.4 } }, fromText) : null
-        )
-      );
-    })
+      }, labelText),
+
+      // Détails Chiffrement & Signature avec clés i18n
+      h('div', { style: { display: 'flex', flexDirection: 'column', gap: '2px', fontSize: '13px', fontWeight: 500 } },
+        encText ? h('div', { style: { display: 'flex', alignItems: 'center', gap: '6px' } }, [
+          h('span', { style: { opacity: 0.65 } }, `• ${host.i18n.t('banner.encrypted_label')} :`),
+          h('span', { style: { fontWeight: 600 } }, encText)
+        ]) : null,
+
+        sigText ? h('div', { style: { display: 'flex', alignItems: 'center', gap: '6px' } }, [
+          h('span', { style: { opacity: 0.65 } }, `• ${host.i18n.t('banner.sig_label')} :`),
+          h('span', { style: { fontWeight: 600 } }, sigText)
+        ]) : null
+      )
+    )
   );
 }
 

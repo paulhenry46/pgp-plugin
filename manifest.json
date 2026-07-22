@@ -107,16 +107,6 @@
       "settings.add_public_key": "Add a public key",
       "toolbar.action.sign_title": "Digitally sign this message",
       "toolbar.action.encrypt_title": "Encrypt this message to its recipients",
-      "banner.decrypted_success": "Decrypted via OpenPGP",
-      "banner.encrypted_locked": "Encrypted — unlock your PGP key to read",
-      "banner.encrypted_prefix": "Encrypted — ",
-      "banner.processing": "PGP : Processing",
-      "banner.sig_valid": "PGP Signature valid",
-      "banner.sig_invalid_prefix": "PGP Signature invalid: ",
-      "banner.sig_unsigned_fallback": "Signed OpenPGP message",
-      "banner.sig_by": " by ",
-      "banner.sig_self_signed": " (self-signed key)",
-      "banner.sig_mismatch": " ⚠ signer ≠ From",
       "banner.secu.encrypted_signed": "Encrypted and signed",
       "banner.secu.encrypted": "Encrypted",
       "banner.secu.signed": "Signed",
@@ -209,8 +199,23 @@
       "confirm.mixed_recipients_title": "Mixed Recipients",
       "confirm.mixed_recipients_message": "Some recipients do not have PGP keys. Continue sending? It will break end-to-end encryption for those recipients. However, the message will still be encrypted for you and recipients with PGP keys.",
       "confirm.mixed_recipients_confirm": "Continue",
-      "banner.encrypted_label": "Encryption State",
-      "banner.sig_label": "Signature State"
+        "banner.title_security": "Message Security",
+        "banner.title_both": "Encrypted & Signed",
+        "banner.title_encrypted": "Encryption",
+        "banner.title_signed": "Digital Signature",
+        "banner.encrypted_label": "Encryption State",
+        "banner.sig_label": "Signature State",
+        "banner.decrypted_success": "Successfully decrypted",
+        "banner.encrypted_locked": "Encrypted message (key locked)",
+        "banner.encrypted_prefix": "Decryption error: ",
+        "banner.processing": "Verifying...",
+        "banner.sig_by": "by ",
+        "banner.sig_mismatch": " (address mismatch)",
+        "banner.sig_self_signed": " (self-signed)",
+        "banner.sig_valid": "Valid signature ",
+        "banner.sig_invalid_prefix": "Invalid signature: ",
+        "banner.sig_unsigned_fallback": "Unsigned"
+
     }
   }
 }
