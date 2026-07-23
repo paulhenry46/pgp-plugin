@@ -1,7 +1,5 @@
 import host from '@plugin-host';
 import React from 'react'
-import * as openpgp from 'openpgp';
-
 const h = React.createElement;
 const { useState, useEffect, useCallback, useRef } = React;
 import {
@@ -21,7 +19,6 @@ import {
   subscribeToKeyUpdates
 } from '../pgp/session-broadcast.ts';
 import { uploadKey, requestVerify, lookup } from '../pgp/server.ts';
-import { deriveAesKeyFromPgpParams, getIndex } from '../cache.ts';
 import { bufferToBytes, bytesToBuffer, generateSalt } from '../util.ts';
 
 export function SettingsSection() {

@@ -21,7 +21,9 @@
     "app:lifecycle",
     "ui:email-details",
     "ui:download-file",
-    "http:fetch"
+    "http:fetch",
+    "contacts:read",
+    "contacts:write"
   ],
   "httpOrigins": [
     "https://keys.openpgp.org"

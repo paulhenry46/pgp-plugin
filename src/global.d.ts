@@ -24,6 +24,13 @@ declare module '@plugin-host' {
     warn(msg: string, ...args: any[]): void;
     error(msg: string, ...args: any[]): void;
   };
+  export const contacts: {
+      get(contactId: string): Promise<ContactCard>;
+      update(contactId: string, updates: Partial<ContactCard>): Promise<void>;
+      create(contact: ContactCard): Promise<string>;
+      search(query: string): Promise<ContactCard[]>;
+    },
+
   export const toast: {
     success(msg: string): void;
     error(msg: string): void;

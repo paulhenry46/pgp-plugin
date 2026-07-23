@@ -7,6 +7,8 @@ import * as openpgp from 'openpgp';
 import host from '@plugin-host';
 import { importOpenPgpPublicKey } from './import.ts';
 import { listPublicCerts } from '../storage.ts';
+import { contacts } from '@plugin-host';
+import { ContactCard, ContactEmail } from '../util.ts';
 // ── Helpers & Conversions ───────────────────────────────────────────
 
 /**
@@ -282,20 +284,58 @@ export async function recipientKeysFor(emails: string[]): Promise<{
   found: Record<string, string>;
   missing: string[];
 }> {
-  const certs = await listPublicCerts();
   const found: Record<string, string> = {};
   const missing: string[] = [];
 
   for (const email of emails) {
     const emailLower = email.toLowerCase();
-    const c = certs.find((pc) => pc.email.toLowerCase() === emailLower);
+    
+    // 1. Recherche du contact correspondant à l'email
+    const searchResults = await contacts.search(emailLower);
+    const contact: ContactCard | undefined = searchResults.find((c) =>
+      c.emails && Object.values(c.emails as Record<string, ContactEmail>).some((e) => e.address.toLowerCase() === emailLower)
+    );
 
-    if (c && c.publicKey) {
-      found[email] = c.publicKey;
+    let armoredKey: string | null = null;
+
+    if (contact?.cryptoKeys) {
+      // 2. On récupère la première clé PGP valide
+      const cryptoKeyEntry = Object.values(contact.cryptoKeys).find(
+        (key) => key.mediaType === 'application/pgp-keys' || key.uri.startsWith('data:application/pgp-keys')
+      );
+
+      if (cryptoKeyEntry?.uri) {
+        try {
+          armoredKey = decodePgpUri(cryptoKeyEntry.uri);
+        } catch (e) {
+          armoredKey = null;
+        }
+      }
+    }
+
+    // 3. Attribution dans `found` ou `missing`
+    if (armoredKey) {
+      found[email] = armoredKey;
     } else {
       missing.push(email);
     }
   }
 
   return { found, missing };
+}
+
+function decodePgpUri(uri: string): string {
+  // Cas Data URI Base64
+  if (uri.startsWith('data:')) {
+    const base64Content = uri.split(',')[1];
+    if (!base64Content) return '';
+    
+    // Décodage Base64 vers UTF-8 propre
+    const binaryString = atob(base64Content);
+    const bytes = Uint8Array.from(binaryString, (char) => char.charCodeAt(0));
+    return new TextDecoder().decode(bytes);
+  }
+
+  // Cas où l'URI contiendrait déjà directement le texte Armored
+  return uri;
 }

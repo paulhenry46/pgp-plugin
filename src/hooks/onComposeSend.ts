@@ -6,7 +6,7 @@ import { buildMimeMessage, wrapAsPgpMimeEncrypted, wrapAsPgpMimeSigned } from '.
 import { pgpSignDetached } from '../pgp/pgp-sign.ts';
 import { pgpEncrypt } from '../pgp/encrypt.ts';
 import { clearArmoredPrivateKeyToPrivateKey } from '../util.ts';
-import { KeyRecord, listKeyRecords, listPublicCerts } from '../storage.ts';
+import { KeyRecord, listKeyRecords } from '../storage.ts';
 
 import {emailsOf, bytesArrayBuffer} from '../util.ts';
 import { INTENT_KEY, settings} from '../shared.ts';

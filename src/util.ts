@@ -1,6 +1,5 @@
 import * as openpgp from 'openpgp';
-import host from '@plugin-host';
-import {  KeyRecord, listKeyRecords, listPublicCerts } from './storage.ts';
+import { listKeyRecords } from './storage.ts';
 import { fetchKeyFromBackground } from './pgp/session-broadcast.ts';
 // Small browser helpers shared across the S/MIME plugin modules.
 // (The native app pulled these from @/lib/utils; the sandbox has no host
@@ -139,4 +138,165 @@ export async function unlockedDecryptMaps() {
 
 export function generateSalt() : ArrayBuffer{
   return crypto.getRandomValues(new Uint8Array(32)).buffer as ArrayBuffer;
+}
+
+export interface ContactCard {
+  id: string;
+  originalId?: string;
+  uid?: string;
+  addressBookIds: Record<string, boolean>;
+  kind?: 'individual' | 'group' | 'org' | 'location' | 'device' | 'application';
+  accountId?: string;
+  accountName?: string;
+  isShared?: boolean;
+  // Local account-store ID - set when the Pro shell aggregates contacts
+  // from multiple connected accounts. See `Calendar.localAccountId`.
+  localAccountId?: string;
+  language?: string;
+  name?: ContactName;
+  nicknames?: Record<string, ContactNickname>;
+  emails?: Record<string, ContactEmail>;
+  phones?: Record<string, ContactPhone>;
+  onlineServices?: Record<string, ContactOnlineService>;
+  preferredLanguages?: Record<string, ContactLanguagePref>;
+  organizations?: Record<string, ContactOrganization>;
+  titles?: Record<string, ContactTitle>;
+  addresses?: Record<string, ContactAddress>;
+  notes?: Record<string, ContactNote>;
+  media?: Record<string, ContactMedia>;
+  cryptoKeys?: Record<string, ContactCryptoKey>;
+  keywords?: Record<string, boolean>;
+  members?: Record<string, boolean>;
+  speakToAs?: {
+    grammaticalGender?: string;
+    pronouns?: Record<string, { pronouns: string; pref?: number; contexts?: Record<string, boolean> }>;
+  };
+  calendarUri?: string;
+  schedulingUri?: string;
+  freeBusyUri?: string;
+  source?: string;
+  prodId?: string;
+  created?: string;
+  updated?: string;
+}
+
+
+export interface ContactName {
+  components?: NameComponent[];
+  isOrdered?: boolean;
+  full?: string;
+  defaultSeparator?: string;
+}
+
+export interface NameComponent {
+  kind: 'given' | 'surname' | 'prefix' | 'suffix' | 'additional' | 'separator' | 'credential' | 'title' | 'middle' | 'given2' | 'surname2' | 'generation';
+  value: string;
+}
+
+export interface ContactEmail {
+  address: string;
+  contexts?: Record<string, boolean>;
+  label?: string;
+  pref?: number;
+}
+
+export interface ContactPhone {
+  number: string;
+  contexts?: Record<string, boolean>;
+  features?: Record<string, boolean>;
+  label?: string;
+  pref?: number;
+}
+
+export interface ContactCryptoKey {
+  uri: string;
+  mediaType?: string;
+  contexts?: Record<string, boolean>;
+}
+
+export interface ContactOnlineService {
+  service?: string;
+  uri: string;
+  user?: string;
+  contexts?: Record<string, boolean>;
+  label?: string;
+  pref?: number;
+}
+
+export interface ContactLanguagePref {
+  language: string;
+  contexts?: Record<string, boolean>;
+  pref?: number;
+}
+
+export interface ContactOrganization {
+  name?: string;
+  units?: Array<{ name: string }>;
+  sortAs?: string;
+}
+
+export interface ContactTitle {
+  name: string;
+  kind?: 'title' | 'role';
+  organizationId?: string;
+}
+
+// RFC 9553 AddressComponent
+export interface AddressComponent {
+  kind: 'room' | 'apartment' | 'floor' | 'building' | 'number' | 'name' | 'block' | 'subDistrict' | 'district' | 'locality' | 'region' | 'postcode' | 'country' | 'direction' | 'landmark' | 'postOfficeBox' | 'separator' | string;
+  value: string;
+  phonetic?: string;
+}
+
+export interface ContactAddress {
+  // RFC 9553 format
+  components?: AddressComponent[];
+  full?: string;
+  isOrdered?: boolean;
+  defaultSeparator?: string;
+  // Legacy flat fields (from vCard import)
+  street?: string;
+  locality?: string;
+  region?: string;
+  postcode?: string;
+  country?: string;
+  countryCode?: string;
+  fullAddress?: string;
+  coordinates?: string;
+  timeZone?: string;
+  contexts?: Record<string, boolean>;
+  label?: string;
+  pref?: number;
+}
+
+export interface ContactNickname {
+  name: string;
+  contexts?: Record<string, boolean>;
+}
+
+export interface ContactNote {
+  note: string;
+  created?: string;
+  author?: { name?: string; uri?: string };
+}
+
+export interface ContactMedia {
+  kind: 'photo' | 'sound' | 'logo';
+  uri: string;
+  mediaType?: string;
+}
+
+// RFC 9553 PartialDate
+export interface PartialDate {
+  '@type'?: 'PartialDate';
+  year?: number;
+  month?: number;
+  day?: number;
+  calendarScale?: string;
+}
+
+// RFC 9553 Timestamp
+export interface Timestamp {
+  '@type': 'Timestamp';
+  utc: string;
 }
