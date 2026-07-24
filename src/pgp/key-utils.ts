@@ -324,7 +324,7 @@ export async function recipientKeysFor(emails: string[]): Promise<{
   return { found, missing };
 }
 
-function decodePgpUri(uri: string): string {
+export function decodePgpUri(uri: string): string {
   // Cas Data URI Base64
   if (uri.startsWith('data:')) {
     const base64Content = uri.split(',')[1];

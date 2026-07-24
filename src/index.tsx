@@ -18,6 +18,7 @@ import { onSearchResults } from './hooks/onSearchresults.ts';
 import { onEmailsFetched } from './hooks/onEmailsFetched.ts';
 import { askForDefaultKeyPass } from './hooks/activate.ts';
 import { onRecipientChipsChange } from './hooks/onRecipientChipsChange.ts';
+import { ContactCrypto } from './ui/contact.tsx';
 
 
 // ─── Privileged-tier capability probe ─────────────────────────────────
@@ -81,6 +82,7 @@ export const slots = {
   'composer-toolbar': { component: ComposerToolbar, order: 70 },
   'email-banner': { component: EmailBanner, order: 20 },
   'settings-section': { component: SettingsSection, order: 100 },
+  'contact-cryptokeys': { component: ContactCrypto, order: 100 },
   "email-details-section": {
     component: EmailSecuBanner,
     shouldShow,

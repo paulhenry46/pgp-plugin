@@ -36,6 +36,7 @@ For more details, refers to [DOCS.md](DOCS.md) file.
 
 
 - [ ] **Address Book Integration:** Native integration of public keys within the Bulwark contact/address book.
+- [ ] Better UI for showing keys in adress book
 - [ ] **Server vs. E2E Badges:** Display a dedicated badge in the email list row to distinguish between E2E encrypted emails and those encrypted server-side (requires a new hook and Stalwart Server modifications). If you want to get this feature, show your interest here : https://support.stalw.art/t/add-an-explicit-server-encryption-marker-header-for-at-rest-encrypted-messages/1139 because now, we can't know if the mail is E2E encrypted or just stored encrypted.
 - [ ] Sync settings + keys accrois devices. Require new clients hook
 - [ ] Generate your keys
