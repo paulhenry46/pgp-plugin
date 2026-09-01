@@ -881,6 +881,53 @@ export function useSettingsLogic() {
     }
   }
 
+  async function handleExportPrivateKey(rec: KeyRecord) {
+
+    const result = await host.ui.prompt({
+      title: host.i18n.t('prompt.export_private_key.title'),
+      message: host.i18n.t('prompt.export_private_key.message'),
+      fields: [{
+        name: 'passphrase',
+        label: host.i18n.t('prompt.unlock_key.passphrase_label'), 
+        type: 'password',
+        required: true 
+      }]
+    });
+
+    if (!result || !result.passphrase) return;
+
+    setBusy(true);
+    try {
+      const passphrase = result.passphrase;
+      const { unlockedPrivateKey } = await unlockPrivateKey(rec, passphrase);
+      const parsedKey = await openpgp.readKey({ armoredKey: unlockedPrivateKey });
+      
+      if (!parsedKey.isPrivate()) {
+        throw new Error("Not a private key");
+      }
+
+      const encryptedPgpKey = await openpgp.encryptKey({
+        privateKey: parsedKey as openpgp.PrivateKey,
+        passphrase: passphrase
+      });
+
+      const armoredExportKey = encryptedPgpKey.armor();
+
+      host.ui.downloadFile({
+        filename: `private_key_${rec.email || 'export'}.asc`, 
+        content: armoredExportKey, 
+        contentType: 'application/pgp-keys'
+      });
+
+      host.toast.success(host.i18n.t('settings.success.private_key_exported'));
+    } catch (err) {
+      const error = err as Error;
+      host.toast.error(host.i18n.t('settings.error.export_failed') + error?.message ? error.message : String(err));
+    } finally {
+      setBusy(false);
+    }
+  }
+
   return {
     accounts,
     selectedAccountId,
@@ -907,6 +954,7 @@ export function useSettingsLogic() {
     changePass,
     handleDownloadKey,
     removeWebAuthnLink,
-    handleSetMainPrivateKey
+    handleSetMainPrivateKey,
+    handleExportPrivateKey
   };
 }

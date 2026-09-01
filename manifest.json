@@ -333,7 +333,12 @@
       "account.encryptionAtRest" : "Encryption at rest",
       "account.draftEncryption" : "Drafts encryption",
       "account.state_title" : "Account Encryption Check",
-      "account.state_subtitle" : "Check for real E2E encryption with PGP"
+      "account.state_subtitle" : "Check for real E2E encryption with PGP",
+      "prompt.export_private_key.title" : "Export Private Key",
+      "prompt.export_private_key.message" : "Export your private key as an armored encrypted PGP key",
+      "settings.success.private_key_exported": "Private key exported successfully!",
+      "settings.error.private_key_export_failed": "Private key export failed.",
+      "settings.action.download_private_key" : "Download private key (.asc)"
     }
   }
 }
