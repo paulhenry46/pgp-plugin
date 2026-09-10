@@ -45,7 +45,7 @@ export interface ComposeRequest {
   html?: string;      
 }
 
-async function signingKeyRecordForEmail(fromEmail: string | undefined): Promise<KeyRecord | undefined> {
+export async function signingKeyRecordForEmail(fromEmail: string | undefined): Promise<KeyRecord | undefined> {
   if (!fromEmail) return undefined;
 
   const recs = await listKeyRecords();
@@ -197,7 +197,6 @@ export async function onComposeSend(req: ComposeRequest): Promise<boolean | unde
         })
       );
 
-      // Mettre à jour attachments avec la version déchiffrée
       attachments.splice(0, attachments.length, ...decryptedAttachments);
     }
 

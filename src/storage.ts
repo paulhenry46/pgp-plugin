@@ -266,7 +266,7 @@ export async function setDefaultKeyRecord(targetId: string, isChecked: boolean):
   );
 }
 
-export async function getDefaultPublicKeyForEncryption(): Promise<string | undefined> {
+export async function getDefaultPublicKeyForEncryption(onlyId:boolean = false): Promise<string | undefined> {
   const db = await openDB();
   const accountId = await getCurrentAccountId();
   let allKeys = await txPromise<KeyRecord[]>(db, KEY_RECORDS_STORE, 'readonly', (s) => s.getAll());
@@ -274,6 +274,7 @@ export async function getDefaultPublicKeyForEncryption(): Promise<string | undef
   const defaultPrivateKey = allKeys.find((k) => k.default === true);
   
   if (defaultPrivateKey) {
+    if(onlyId) return defaultPrivateKey.id;
     return defaultPrivateKey.publicKey;
   }
   return undefined;
