@@ -10,7 +10,7 @@ import host from '@plugin-host';
 import { base64ToBuffer, bufferToBase64, getCurrentAccountId } from "./util.ts";
 
 const DB_NAME = 'pgp-plugin-store';
-const DB_VERSION = 13;
+const DB_VERSION = 15;
 const KEY_RECORDS_STORE = 'key-records';
 const SESSION_KEYS_STORE = 'session-keys';
 const MESSAGE_CACHE_STORE = 'message-cache';
@@ -18,6 +18,7 @@ const RECIPIENTS_STORE = 'recipients-cache';
 const DANGEROUS_KEYS_STORE = 'dangerous-keys';
 const DANGEROUS_MASTER_KEY_STORE = 'dangerous-master-key';
 const MIGRATIONS_STORE = 'migrations';
+const PLUGINS_STORAGE = 'plugins-storage';
 
 // ── Interfaces ──────────────────────────────────────
 
@@ -147,6 +148,9 @@ function openDB(): Promise<IDBDatabase> {
       if (!db.objectStoreNames.contains(MIGRATIONS_STORE)) {
         db.createObjectStore(MIGRATIONS_STORE, { keyPath: 'version' });
       }
+      if (!db.objectStoreNames.contains(PLUGINS_STORAGE)) {
+        db.createObjectStore(PLUGINS_STORAGE, { keyPath: 'id' });
+      }
     };
     
     request.onsuccess = () => resolve(request.result);
@@ -171,6 +175,28 @@ function txPromise<T>(
     req.onsuccess = () => resolve(req.result as T);
     req.onerror = () => reject(req.error);
   });
+}
+// ── Plugins Store ───────────────────────────────────────
+// This is used to store data of others plugin compatible with this plugin, such as calendar-encryption plugin.
+
+export async function savePluginData(pluginId: string, data: any, accountId: string): Promise<void> {
+  const db = await openDB();
+  const entry = {
+    id: pluginId+'___'+accountId,
+    data,
+    accountId
+  };
+  await txPromise<IDBValidKey>(db, PLUGINS_STORAGE, 'readwrite', (s) => s.put(entry));
+}
+
+export async function getPluginData(pluginId: string, accountId: string): Promise<any | undefined> {
+  const db = await openDB();
+  return txPromise<any | undefined>(db, PLUGINS_STORAGE, 'readonly', (s) => s.get(pluginId+'___'+accountId));
+}
+
+export async function deletePluginData(pluginId: string, accountId: string): Promise<void> {
+  const db = await openDB();
+  await txPromise<undefined>(db, PLUGINS_STORAGE, 'readwrite', (s) => s.delete(pluginId+'___'+accountId));
 }
 
 // ── Migrations Store ───────────────────────────────────────

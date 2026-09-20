@@ -1,6 +1,6 @@
 import { getPreview, search } from '../cache.ts';
 import { config, settings } from '../shared.ts';
-import { DecryptedCachePayload, listKeyRecords, SessionKeysEntry } from '../storage.ts';
+import { DecryptedCachePayload, getPluginData, listKeyRecords, SessionKeysEntry } from '../storage.ts';
 import { deriveSecret } from './key-utils.ts';
 import { loadDangerousPassphrases, getKeyRecord } from '../storage.ts';
 import { unlockPrivateKey } from './import.ts'; 
@@ -25,8 +25,10 @@ type SessionMessage =
   | { type: 'REQUEST_SEARCH'; requestId: string; query: string }
   | { type: 'RESPONSE_SEARCH'; requestId: string; matchingIds: string[] }
   | { type: 'UPDATE_RAM_INDEX_ENTRY'; id: string; payload: DecryptedCachePayload }
-  | { type: 'REQUEST_CUSTOM_SECRET'; requestId: string; salt: string; }
-  | { type: 'RESPONSE_CUSTOM_SECRET'; requestId: string; secret: string | null };
+  | { type: 'REQUEST_ADD_CUSTOM_SECRET'; requestId: string; salt: string; accountId: string; data: any }
+  | { type: 'RESPONSE_ADD_CUSTOM_SECRET'; requestId: string; ok: boolean; }
+  | { type: 'REQUEST_CUSTOM_SECRET'; requestId: string; salt: string; accountId: string }
+  | { type: 'RESPONSE_CUSTOM_SECRET'; requestId: string; secret: string | null; data: any | undefined; };
 
 export function initBackgroundSessionListener(): void {
   const channel = new BroadcastChannel(CHANNEL_NAME);
@@ -95,7 +97,7 @@ export function initBackgroundSessionListener(): void {
 
         (async () => {
         const allKeys = await listKeyRecords();
-        const defaultKey = allKeys.find((k) => k.default === true);
+        const defaultKey = allKeys.find((k) => k.default === true && k.accountId === msg.accountId);
 
           if (!defaultKey) {
             return;
@@ -110,11 +112,13 @@ export function initBackgroundSessionListener(): void {
             return;
           }
         const secret = await deriveSecret(hmacKey, msg.salt);
+        const data = await getPluginData(msg.salt, msg.accountId);
         
         channel.postMessage({
           type: 'RESPONSE_CUSTOM_SECRET',
           requestId: msg.requestId,
-          secret: secret
+          secret: secret,
+          data: data
         });
         })();
         break;
