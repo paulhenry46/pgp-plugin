@@ -3,7 +3,6 @@
  *
  * Three stores:
  * - key-records:   encrypted-at-rest private keys + public keys (durable)
- * - public-certs:  recipient/contact public PGP keys (durable)
  * - local index:      decrypted mail previews + tokens (volatile, cleared on logout)
  */
 import host from '@plugin-host';
@@ -491,7 +490,6 @@ export async function exportPluginData(accountId?: string): Promise<void> {
   try {
     const db = await openDB();
     let rawKeys: KeyRecord[];
-    let rawCerts: PublicCert[];
     let rawCache: EncryptedMessageCache[];
     let rawMigrations: DbMigration[] = [];
 
@@ -553,8 +551,8 @@ export async function exportPluginData(accountId?: string): Promise<void> {
 export async function importPluginData(jsonContent: string, accountId?: string): Promise<void> {
   try {
     const backup = JSON.parse(jsonContent);
-    if (backup.format !== "openpgp-plugin-backup" || !backup.keys || !backup.certs || !backup.messageCache) {
-      throw new Error("Invalid backup file. Missing keys, certs or message cache.");
+    if (backup.format !== "openpgp-plugin-backup" || !backup.keys) {
+      throw new Error("Invalid backup file. Missing keys or message cache.");
     }
 
     const db = await openDB();
