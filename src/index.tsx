@@ -24,6 +24,7 @@ import {restoreKeysFromDangerousStorage} from './pgp/session-broadcast.ts';
 import { onAfterLogout } from './hooks/onAfterLogout.ts';
 import {onBeforeComposeOpenToReply, onBeforeComposeOpenToReplyAll, onBeforeComposeOpenToForward} from './hooks/onBeforeComposeOpenTo.ts';
 import { main } from './migrations/2.0.0.ts';
+import { adoptOrphanKeyRecords } from './pgp/account-keys.ts';
 import {onBeforeEmailSend} from './hooks/onBeforeEmailSend.ts';
 
 
@@ -70,6 +71,7 @@ export const hooks = {
   onRecipientChipsChange,
   onAfterLogout,
   async onAccountSwitch() {
+    await adoptOrphanKeyRecords();
     if (settings().lockOnLogout === false) return;
    await clearDangerousStorage();
   },
@@ -110,6 +112,8 @@ export async function activate(api :any) {
     await main();
     await recordMigration(2, 'Migration to 2.0.0: Assign keys to accounts and remove message cache.');
   }
+
+  await adoptOrphanKeyRecords();
 
   let locked = true;
   initBackgroundSessionListener();
