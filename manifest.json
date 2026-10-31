@@ -26,7 +26,8 @@
     "contacts:write",
     "admin:config",
     "account:read",
-    "identity:read"
+    "identity:read",
+    "ui:contact-cryptokeys"
   ],
   "httpOrigins": [
     "https://keys.openpgp.org"
