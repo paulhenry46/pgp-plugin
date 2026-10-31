@@ -74,6 +74,39 @@ export function parseMime(bytes: Uint8Array): ParseMimeResult {
 }
 
 /** Handles a plain text block containing PGP without complex MIME structure */
+/** Returns the inner PGP message if the whole payload is one, else null. */
+export function findNestedPgpMessage(bytes: Uint8Array): { armored: string; inline: boolean } | null {
+  const BEGIN = '-----BEGIN PGP MESSAGE-----';
+  const END = '-----END PGP MESSAGE-----';
+  // Exactly one armor block and nothing else; indexOf keeps it linear
+  const singleArmor = (s: string) => {
+    const t = s.trim();
+    const end = t.startsWith(BEGIN) ? t.indexOf(END) : -1;
+    return end >= 0 && end + END.length === t.length ? t : undefined;
+  };
+  const text = binaryString(bytes);
+  const bare = singleArmor(text);
+  if (bare) return { armored: bare, inline: true };
+  const node = parseEntity(text);
+  if (node.type === 'text/plain' && !node.disposition.includes('attachment')) {
+    const armored = singleArmor(decodeText(node));
+    return armored ? { armored, inline: true } : null;
+  }
+  if (node.type === 'multipart/encrypted' && node.params.protocol === 'application/pgp-encrypted') {
+    const part = node.children.find((c) => c.type === 'application/octet-stream');
+    const armored = part ? singleArmor(decodeText(part)) : undefined;
+    return armored ? { armored, inline: false } : null;
+  }
+  return null;
+}
+
+/** True if the content starts with a MIME header block. */
+export function looksLikeMime(bytes: Uint8Array): boolean {
+  const text = binaryString(bytes);
+  const sep = text.search(/\r?\n\r?\n/);
+  return sep >= 0 && /^content-type:/im.test(text.slice(0, sep));
+}
+
 function parsePgpInline(rawText: string): ParseMimeResult {
   // Removes residual HTTP/SMTP transport header noise if present
   const cleanText = rawText.trim();
