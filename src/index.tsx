@@ -1,8 +1,3 @@
-/**
- * OpenPGP — privileged (same-origin) webmail plugin.
- *
- */
-
 import {EmailSecuBanner, EmailBanner} from './ui/banners.tsx';
 import {SettingsSection} from './ui/settings.tsx';
 import {ComposerToolbar} from './ui/composer-toolbar.tsx';

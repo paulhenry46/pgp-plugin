@@ -60,6 +60,12 @@
       "label": "Allow persistent keys",
       "description": "Allow users to activate the persistent key feature (unlocked keys stored in indexedDB encrypted with a non extractible webCrypto key).",
       "default": false
+    },
+    "forceRemoveOnLogout": {
+      "type": "boolean",
+      "label": "Remove plugin data when you log out",
+      "description": "Remove all encrypted plugin data when the user logs out.",
+      "default": false
     }
   },
   "settingsSchema": {
@@ -116,9 +122,15 @@
     },
     "lockOnLogout": {
       "type": "boolean",
-      "label": "Lock keys on logout",
-      "description": "Whether to lock all keys when the user logs out. This is used only when StoreDangerous is enabled. This is useful if you want to avoid leaving unlocked keys in memory when the user logs out.",
+      "label": "Lock keys when switching accounts.",
+      "description": "Whether to lock all keys when switching accounts. This remove the dangerous storage when switching accounts.",
       "default": false
+    },
+    "removeOnLogout": {
+      "type": "boolean",
+      "label": "Remove encrypted plugin data when you log out",
+      "description": "Whether to remove all encrypted plugin data (keys, message cache, search index) when the user logs out. The unecrypted data is always removed as it is in RAM.",
+      "default": true
     },
     "generateKey": {
       "type": "select",
