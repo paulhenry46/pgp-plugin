@@ -35,13 +35,19 @@ export function detectPgp(
   if (contentType) {
     const ct = contentType.toLowerCase();
 
-    if (ct.includes('multipart/encrypted') && ct.includes('protocol="application/pgp-encrypted"')) {
+    if (ct.includes('multipart/encrypted') && ct.includes('application/pgp-encrypted')) {
+      // RFC 3156: the application/pgp-encrypted part is only "Version: 1".
+      // The encrypted message is the application/octet-stream payload.
       const part = findPgpMimePart(bodyStructure, 'application/octet-stream');
-      return { 
-        type: 'pgp-mime-encrypted', 
-        blobId: bodyStructure?.blobId || part?.blobId,
-        partId: part?.partId, 
-        supported: true 
+      const attachment = attachments?.find((att) =>
+        (att.name || '').toLowerCase() === 'encrypted.asc' ||
+        (att.type || '').toLowerCase().includes('application/octet-stream')
+      );
+      return {
+        type: 'pgp-mime-encrypted',
+        blobId: part?.blobId || attachment?.blobId || bodyStructure?.blobId,
+        partId: part?.partId || attachment?.partId,
+        supported: true
       };
     }
 
@@ -60,12 +66,27 @@ export function detectPgp(
 
   // 3. Detection via attachments (.asc, .pgp, .sig files)
   if (attachments && attachments.length > 0) {
+    // Some JMAP servers expose both PGP/MIME parts as attachments even when
+    // the multipart Content-Type is unavailable. Never decrypt the marker.
+    const hasProtocolPart = attachments.some((att) =>
+      (att.type || '').toLowerCase().includes('application/pgp-encrypted')
+    );
+    if (hasProtocolPart) {
+      const payload = attachments.find((att) =>
+        (att.name || '').toLowerCase() === 'encrypted.asc' ||
+        (att.type || '').toLowerCase().includes('application/octet-stream')
+      );
+      if (payload?.blobId) {
+        return { type: 'pgp-mime-encrypted', blobId: payload.blobId, partId: payload.partId, supported: true };
+      }
+    }
+
     for (const att of attachments) {
       const type = att.type?.toLowerCase() || '';
       const name = att.name?.toLowerCase() || '';
 
       if (type.includes('application/pgp-encrypted')) {
-        return { type: 'pgp-mime-encrypted', blobId: att.blobId, partId: att.partId, supported: true };
+        continue;
       }
       
       if (type.includes('application/pgp-signature') || name === 'signature.asc' || name.endsWith('.sig')) {
@@ -102,7 +123,8 @@ function walkBodyStructure(part: any): PgpDetectionResult | null {
   const type = part.type?.toLowerCase() || '';
 
   if (type.includes('application/pgp-encrypted')) {
-    return { type: 'pgp-mime-encrypted', blobId: part.blobId, partId: part.partId, supported: true };
+    // A protocol marker by itself is not encrypted message data.
+    return null;
   }
 
   if (type === 'multipart/encrypted' || type === 'multipart/signed') {
@@ -115,12 +137,12 @@ function walkBodyStructure(part: any): PgpDetectionResult | null {
 
     if (hasPgp) {
       if (type === 'multipart/encrypted') {
-        const encryptedControlPart = subParts.find((sp: any) => sp.type?.toLowerCase().includes('application/octet-stream'));
-        return { 
-          type: 'pgp-mime-encrypted', 
-          blobId: part.blobId || encryptedControlPart?.blobId, 
-          partId: encryptedControlPart?.partId, 
-          supported: true 
+        const encryptedDataPart = subParts.find((sp: any) => sp.type?.toLowerCase().includes('application/octet-stream'));
+        return {
+          type: 'pgp-mime-encrypted',
+          blobId: encryptedDataPart?.blobId || part.blobId,
+          partId: encryptedDataPart?.partId,
+          supported: true
         };
       } else {
         // multipart/signed: Le blob principal doit être le conteneur part.blobId

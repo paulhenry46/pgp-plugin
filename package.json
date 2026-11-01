@@ -6,6 +6,7 @@
   "scripts": {
     "build": "esbuild ./src/index.tsx --bundle --format=cjs --platform=browser --charset=utf8 --outfile=dist/index.js --external:react --external:react-dom --external:react-dom/client --external:react/jsx-runtime --external:@plugin-host",
     "dev": "npm run build -- --watch",
+    "test": "node --test test/*.test.mjs",
     "package": "npm run build && cp manifest.json dist/ && cd dist && zip -X ../pgpe2e.zip manifest.json index.js"
   },
   "dependencies": {
