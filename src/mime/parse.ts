@@ -44,9 +44,10 @@ export function parseMime(bytes: Uint8Array): ParseMimeResult {
   const text = binaryString(bytes);
   
   // ── Specific PGP Inline Case ──────────────────────────────────────
-  // If the raw payload received directly contains a PGP encrypted or signed text block
-  if (text.includes('-----BEGIN PGP MESSAGE-----') || text.includes('-----BEGIN PGP SIGNED MESSAGE-----')) {
-    return parsePgpInline(text);
+  // Payload itself is armored, not just quoting armor
+  const head = text.trimStart();
+  if (head.startsWith('-----BEGIN PGP MESSAGE-----') || head.startsWith('-----BEGIN PGP SIGNED MESSAGE-----')) {
+    return parsePgpInline(decoder.decode(bytes));
   }
 
   const node = parseEntity(text);
