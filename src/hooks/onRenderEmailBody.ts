@@ -4,7 +4,7 @@ import * as openpgp from 'openpgp';
 import { pgpVerify } from '../pgp/pgp-verify.ts';
 import { pgpDecrypt, normalizePgpMessage, PgpKeyLockedError } from '../pgp/decrypt.ts';
 import { detectPgp } from '../pgp/detect.ts'; 
-import { parseMime } from '../mime/parse.ts';
+import { parseMime, findNestedPgpMessage, looksLikeMime } from '../mime/parse.ts';
 import { decodePgpUri, extractKeyInfo, keyRecordEmails, scanAndImportKeysFromAttachments } from '../pgp/key-utils.ts';
 import { listKeyRecords } from '../storage.ts';
 
@@ -328,6 +328,26 @@ async function handleMimeEncrypted(
   //3. check if the message is encrypted by server or not
   const isEncryptedByServer = rawMessageString.includes('Automatically encrypted by Stalwart');
 
+  // Server encryption at rest around E2E mail: unwrap the inner layer too
+  let innerIsInline = false;
+  for (let depth = 0; isEncryptedByServer && depth < 3; depth++) {
+    const nested = findNestedPgpMessage(result.mimeBytes);
+    if (!nested) break;
+    try {
+      const inner = await pgpDecrypt({
+        cmsBytes: new TextEncoder().encode(nested.armored),
+        keyRecords,
+        unlockedKeys,
+        knownPublicKeys,
+      });
+      result = { ...inner, keyRecordAccountId: inner.keyRecordAccountId ?? result.keyRecordAccountId };
+      innerIsInline = nested.inline;
+    } catch (err) {
+      host.log.error('nested PGP layer could not be decrypted', err);
+      break;
+    }
+  }
+
   const verification: any = {
     isEncrypted: true,
     isEncryptedByServer: isEncryptedByServer,
@@ -372,7 +392,9 @@ async function handleMimeEncrypted(
     }
   }
 
-  const parsed = parseMime(result.mimeBytes);
+  const parsed = innerIsInline && !looksLikeMime(result.mimeBytes)
+    ? { html: '', text: new TextDecoder().decode(result.mimeBytes), attachments: [], pgpSignatureBlock: null }
+    : parseMime(result.mimeBytes);
   await persistVerifyStatus(ctx.id, verification);
 
   if (parsed.attachments) {
