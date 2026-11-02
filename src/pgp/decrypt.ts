@@ -4,6 +4,8 @@ import { clearArmoredPrivateKeyToPrivateKey } from '../util.ts';
 import { unlockPrivateKey } from './import.ts';
 import { broadcastUnlockKey } from './session-broadcast.ts';
 import host from '@plugin-host';
+import { normalizePgpMessage } from './normalize.ts';
+export { normalizePgpMessage } from './normalize.ts';
 
 export class PgpKeyLockedError extends Error {
   public keyRecordId: string;
@@ -126,30 +128,6 @@ export async function findMatchingKeyRecords(
   }
 
   return matches;
-}
-
-/**
- * Cleans and normalizes the input (which can be binary or a string corrupted by JMAP transport)
- * to restore a clean ASCII Armored OpenPGP block.
- */
-export function normalizePgpMessage(raw: Uint8Array | string): string {
-  if (!raw || (typeof raw === 'string' && raw.trim() === '')) return '';
-
-  let text = typeof raw === 'string' ? raw : new TextDecoder('utf-8', { fatal: false }).decode(raw);
-  text = text.trim();
-
-  if (text.includes('-----BEGIN PGP MESSAGE-----')) {
-    return text;
-  }
-
-  // Fallback in case the ASCII armor was stripped but the data remains raw Base64
-  // Extracts the base64 block and re-encapsulates with standard OpenPGP headers
-  const cleanedBase64 = text.replace(/[^A-Za-z0-9+/=]/g, '');
-  if (cleanedBase64.length > 32) {
-    return `-----BEGIN PGP MESSAGE-----\n\n${cleanedBase64}\n-----END PGP MESSAGE-----`;
-  }
-
-  return text;
 }
 
 async function askForKeyAndRerender(keyRecordId: string, identity: string): Promise<void> {
