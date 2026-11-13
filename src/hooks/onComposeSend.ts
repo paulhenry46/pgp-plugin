@@ -83,6 +83,13 @@ export async function resolveIntent(req:any) {
     sign = typeof stored.sign === 'boolean' ? stored.sign : settings().defaultSign;
     encrypt = typeof stored.encrypt === 'boolean' ? stored.encrypt : settings().defaultEncrypt;
   }
+  if ((sign || encrypt) && (await listKeyRecords()).length === 0) {
+    // No key at all: the user never set OpenPGP up. The toolbar only asks
+    // them to import a key, so the sign/encrypt defaults can't be turned
+    // off there; send plain mail. Admin policies that require a key
+    // (forceEncryption, blockUntilDefaultKeyIsAvailable) are checked apart.
+    return { sign: false, encrypt: false };
+  }
   return { sign: !!sign, encrypt: !!encrypt };
 }
 
