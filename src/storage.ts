@@ -201,6 +201,12 @@ export async function deletePluginData(pluginId: string, accountId: string): Pro
   await txPromise<undefined>(db, PLUGINS_STORAGE, 'readwrite', (s) => s.delete(pluginId+'___'+accountId));
 }
 
+export async function getPluginsDataForAccount(accountId: string): Promise<{id: string; data: any; accountId: string; }[]>{
+  const db = await openDB();
+  const entries = await txPromise<any[]>(db, PLUGINS_STORAGE, 'readonly', (s) => s.getAll());
+  return entries.filter((entry) => entry && entry.accountId === accountId);
+}
+
 // ── Migrations Store ───────────────────────────────────────
 export async function recordMigration(version: number, description?: string): Promise<void> {
   const db = await openDB();
