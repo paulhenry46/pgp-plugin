@@ -501,6 +501,7 @@ export async function exportPluginData(accountId?: string): Promise<void> {
     let rawKeys: KeyRecord[];
     let rawCache: EncryptedMessageCache[];
     let rawMigrations: DbMigration[] = [];
+    let rawPluginsData: any[] = [];
 
     if (accountId) {
       rawKeys = (await txPromise<KeyRecord[]>(db, KEY_RECORDS_STORE, 'readonly', (s) => s.getAll())).filter((k) => k.accountId === accountId);
@@ -514,6 +515,13 @@ export async function exportPluginData(accountId?: string): Promise<void> {
 
     if (db.objectStoreNames.contains(MIGRATIONS_STORE)) {
       rawMigrations = await txPromise<DbMigration[]>(db, MIGRATIONS_STORE, 'readonly', (s) => s.getAll());
+    }
+
+    if (db.objectStoreNames.contains(PLUGINS_STORAGE)) {
+      const allPluginsData = await txPromise<any[]>(db, PLUGINS_STORAGE, 'readonly', (s) => s.getAll());
+      rawPluginsData = accountId 
+        ? allPluginsData.filter((entry) => entry && entry.accountId === accountId)
+        : allPluginsData;
     }
 
     const serializedKeys = rawKeys.map(key => ({
@@ -542,7 +550,8 @@ export async function exportPluginData(accountId?: string): Promise<void> {
       createdAt: new Date().toISOString(),
       keys: serializedKeys,
       messageCache: serializedCache,
-      migrations: rawMigrations
+      migrations: rawMigrations,
+      pluginsStorage: rawPluginsData
     };
 
     const jsonString = JSON.stringify(backupPackage, null, 2);
@@ -621,6 +630,19 @@ export async function importPluginData(jsonContent: string, accountId?: string):
         storeMigrations.put(migration);
       }
       transactionsToWait.push(txMigrations);
+    }
+
+    if (Array.isArray(backup.pluginsStorage) && db.objectStoreNames.contains(PLUGINS_STORAGE)) {
+      const pluginsToImport = accountId
+        ? backup.pluginsStorage.filter((entry: any) => entry.accountId === accountId)
+        : backup.pluginsStorage;
+
+      const txPlugins = db.transaction(PLUGINS_STORAGE, 'readwrite');
+      const storePlugins = txPlugins.objectStore(PLUGINS_STORAGE);
+      for (const entry of pluginsToImport) {
+        storePlugins.put(entry);
+      }
+      transactionsToWait.push(txPlugins);
     }
 
     await Promise.all(
