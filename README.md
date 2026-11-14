@@ -7,8 +7,7 @@ End-to-end PGP for Bulwark Webmail. All cryptography runs locally in the browser
 ![Screenhot of Plugin](./screen.png)
 ## Main Features
 
-- **Core Cryptography** : Seamlessly encrypt, decrypt, sign, and verify emails locally using a modern OpenPGP engine. 
-  - *Formats supported:* **PGP/MIME** (Read & Write) | **Inline-PGP** (Read-only, for legacy compatibility).
+- **Core Cryptography** : Seamlessly encrypt, decrypt, sign, and verify emails locally using a modern OpenPGP engine. *Formats supported:* **PGP/MIME** (Read & Write) | **Inline-PGP** (Read-only, for legacy compatibility).
 - **Zero-Disk Session Security (100% RAM)** : Unlike traditional plugins that temporarily write unlocked secret keys to shared browser storage (like IndexedDB), **PGP True E2E** isolates unlocked keys strictly within active plugin memory. Your decrypted keys never touch the disk, not even for a millisecond, ensuring instant destruction upon tab closure or browser crash.
 - **True End-to-End Drafts & Attachments** : Standard PGP extensions only encrypt when you hit "Send", leaving your auto-saved drafts and attachments exposed to the mail server in cleartext while you write. This plugin intercepts the webmail's auto-save and upload cycles, encrypting drafts, attachments, and metadata (such as filename and MIME type) before they ever reach the network.
 - **Encrypted-at-Rest Local Search Index** : **PGP True E2E** securely decrypts and indexes your emails into a local, encrypted-at-rest database. Search your secure history instantly without leaking a single keyword to the mail server or writing decrypted text to the disk.
@@ -42,11 +41,22 @@ For more details, refers to [DOCS.md](DOCS.md) file.
 - **Privileged Tier:** The plugin declares `tier: "privileged"` + `crypto:full`. Per `resolvePluginTier`, the same-origin tier is only granted to a **signed, admin-approved (managed)** bundle after high-risk consent. Self-uploaded copies are refused (not downgraded):it must be signed and shipped through the admin channel.
 - **Keys at Rest:** Private keys are re-wrapped with AES-256-GCM under an argon2id + generated salt (default) or PBKDF2 (SHA-256, 600,000 iterations, legacy) key derived from your custom passphrase. They are stored in IndexedDB; raw private key bytes are never persisted.
 - **Keys in Use:** Unlocking a key stores it strictly in RAM. It is **never** persisted to IndexedDB or written to disk during the active session.
-- **XSS & Isolation Limit:** The background part of the plugin acts like a service worker, communicating keys to other sandboxed components. 
-  * *Note on Threat Model:* If an attacker successfully executes arbitrary JavaScript in the client (via XSS or a malicious third-party plugin), they could potentially intercept keys in memory. This is an inherent limitation of web-based cryptography. However, our 100% RAM isolation significantly reduces the attack surface compared to disk-bound alternatives that write active keys to browser storage.
+- **XSS & Isolation Limit:** The background part of the plugin acts like a service worker, communicating keys to other sandboxed components. If an attacker successfully executes arbitrary JavaScript in the client (via XSS or a malicious third-party plugin), they could potentially intercept keys in memory. This is an inherent limitation of web-based cryptography. However, our 100% RAM isolation significantly reduces the attack surface compared to disk-bound alternatives that write active keys to browser storage.
 - **Keys in Use:** with DangerousStorage activated : Stored encrypted with a non extractible AES key. It allows user to avoid decrypting when refreshing
 - **Output Sanitization:** Returned HTML still passes through the host mail sanitizer before rendering.
-
+### Keys derivation schema
+```mermaid
+flowchart TD
+    A[Passphrase] --> B[HKDF Key]
+    E[Salt] --> B[HKDF Key]
+    B --> C[AES : pgp-wrapping-key]
+    B --> D[AES : aes-key]
+    B --> F[HMAC : secret-generator]
+    H(Local Search Index and Preview)-- encrypted with --> D
+    I(PGP Private Key)-- encrypted with --> C
+    G(External Privileged Plugin)-- salt --> F
+    F -- secret --> G
+```
 ## Local search index and keys Synchronisation
 This currently not supported in this plugin, but you can use the fork made by [AurionMail](https://github.com/AurionMail/). It adds these features and many other !
 ## Build & Installation
