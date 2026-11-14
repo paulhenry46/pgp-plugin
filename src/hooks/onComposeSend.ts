@@ -464,12 +464,18 @@ export async function onComposeSend(req: ComposeRequest): Promise<boolean | unde
       await host.jmap.importRaw(bytesArrayBuffer(sentBytes), ['sent']);
     }
 
-    // Confirmation toasts
-    host.toast.success(
-      encrypt && sign ? host.i18n.t('success.sent_signed_encrypted')
-        : encrypt ? host.i18n.t('success.sent_encrypted')
-          : host.i18n.t('success.sent_signed'),
-    );
+    // Confirmation toasts: report what was sent, not what was asked for.
+    // Encryption only reaches recipients with a public key: all of them in
+    // scenario A, some in B, none in C (clear or only signed on the wire).
+    if (encrypt && nonPgpRecipients.length === 0) {
+      host.toast.success(sign ? host.i18n.t('success.sent_signed_encrypted') : host.i18n.t('success.sent_encrypted'));
+    } else if (encrypt && pgpRecipients.length > 0) {
+      host.toast.warning(host.i18n.t('warn.sent_partially_encrypted'));
+    } else if (encrypt) {
+      host.toast.warning(sign ? host.i18n.t('warn.sent_signed_not_encrypted') : host.i18n.t('warn.sent_not_encrypted'));
+    } else {
+      host.toast.success(host.i18n.t('success.sent_signed'));
+    }
 
     await host.storage.set(INTENT_KEY, {});
     return false;
