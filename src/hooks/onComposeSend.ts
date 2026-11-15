@@ -272,7 +272,6 @@ export async function onComposeSend(req: ComposeRequest): Promise<boolean | unde
       const finalEnvelopeBlob = wrapAsPgpMimeEncrypted(encryptedBlob, {
         from, to: req.to, cc: req.cc, subject: req.subject || '', inReplyTo: req.inReplyTo, references: req.references, messageId
       });
-      host.log.info('final message text - Scenario A:', new TextDecoder().decode(await finalEnvelopeBlob.arrayBuffer()));
 
       const rawBytes = await blobToBytes(finalEnvelopeBlob);
       // allRecipientEmails includes ALL emails (To + Cc + Bcc) for SMTP/JMAP delivery
@@ -404,8 +403,6 @@ export async function onComposeSend(req: ComposeRequest): Promise<boolean | unde
       const clearBytes = await blobToBytes(clearEnvelopeBlob);
 
       // B.3: Targeted network deliveries (passing full envelope lists including Bcc)
-      host.log.info('final message text - Scenario B - PGP envelope:', new TextDecoder().decode(await pgpEnvelopeBlob.arrayBuffer()));
-      host.log.info('final message text - Scenario B - Non PGP envelope:', new TextDecoder().decode(await clearEnvelopeBlob.arrayBuffer()));
       await host.jmap.submitRaw(bytesArrayBuffer(pgpBytes), identityId, { envelopeRecipients: pgpEnvelopeRecipients });
 
       await host.jmap.submitRaw(bytesArrayBuffer(clearBytes), identityId, { envelopeRecipients: nonPgpEnvelopeRecipients });
@@ -436,10 +433,8 @@ export async function onComposeSend(req: ComposeRequest): Promise<boolean | unde
         networkEnvelopeBlob = wrapAsPgpMimeSigned(clearMimeBytesBlob, signatureBlob, {
           from, to: req.to, cc: req.cc, subject: req.subject || '', inReplyTo: req.inReplyTo, references: req.references, messageId
         });
-        host.log.info('final message text - Scenario C (with signature) - Network envelope:', new TextDecoder().decode(await networkEnvelopeBlob.arrayBuffer()));
       } else {
         networkEnvelopeBlob = new Blob([clearMimeBytesWithID as BlobPart], { type: 'application/octet-stream' });
-        host.log.info('final message text - Scenario C (no signature) - Network envelope:', new TextDecoder().decode(await networkEnvelopeBlob.arrayBuffer()));
       }
 
       // C.2: Envelope encrypted ONLY with sender's public key for the Sent folder
