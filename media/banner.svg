@@ -1,20 +1,18 @@
 <?xml version="1.0" encoding="UTF-8" standalone="no"?>
 <svg
-   viewBox="0 0 320 120"
-   width="320"
-   height="120"
+   viewBox="0 0 1200 675"
+   width="1200"
+   height="675"
    version="1.1"
-   id="svg3"
-   sodipodi:docname="banner.svg"
+   id="svg8"
+   sodipodi:docname="banner_1.svg"
    inkscape:version="1.4.4 (1:1.4.4+202605061435+dcaf3e7d9e)"
    xmlns:inkscape="http://www.inkscape.org/namespaces/inkscape"
    xmlns:sodipodi="http://sodipodi.sourceforge.net/DTD/sodipodi-0.dtd"
    xmlns="http://www.w3.org/2000/svg"
    xmlns:svg="http://www.w3.org/2000/svg">
-  <defs
-     id="defs3" />
   <sodipodi:namedview
-     id="namedview3"
+     id="namedview8"
      pagecolor="#ffffff"
      bordercolor="#000000"
      borderopacity="0.25"
@@ -22,52 +20,94 @@
      inkscape:pageopacity="0.0"
      inkscape:pagecheckerboard="0"
      inkscape:deskcolor="#d1d1d1"
-     inkscape:zoom="1.9677456"
-     inkscape:cx="175.32754"
-     inkscape:cy="59.967102"
+     inkscape:zoom="0.58444444"
+     inkscape:cx="590.30419"
+     inkscape:cy="322.52852"
      inkscape:window-width="1920"
      inkscape:window-height="998"
      inkscape:window-x="0"
      inkscape:window-y="0"
      inkscape:window-maximized="1"
-     inkscape:current-layer="svg3" />
+     inkscape:current-layer="svg8" />
+  <defs
+     id="defs2">
+    <filter
+       id="grain-ai-b"
+       x="0"
+       y="0"
+       width="1"
+       height="1">
+      <feTurbulence
+         type="fractalNoise"
+         baseFrequency="0.85"
+         numOctaves="2"
+         seed="5"
+         stitchTiles="stitch"
+         id="feTurbulence1" />
+      <feColorMatrix
+         values="0 0 0 0 1   0 0 0 0 1   0 0 0 0 1   0 0 0 0.16 0"
+         id="feColorMatrix1" />
+      <feComposite
+         in2="SourceGraphic"
+         operator="in"
+         id="feComposite1" />
+    </filter>
+    <linearGradient
+       id="bg-ai-b"
+       x1="0"
+       y1="0"
+       x2="1"
+       y2="1">
+      <stop
+         offset="0"
+         stop-color="#E879F9"
+         id="stop1"
+         style="stop-color:#db3b62;stop-opacity:1;" />
+      <stop
+         offset="1"
+         stop-color="#86198F"
+         id="stop2"
+         style="stop-color:#662541;stop-opacity:1;" />
+    </linearGradient>
+  </defs>
   <rect
-     width="320"
-     height="120"
-     rx="12"
-     fill="#1e2a52"
-     id="rect1"
-     style="fill:#662541;fill-opacity:1" />
-  <g
-     transform="translate(28 30)"
-     id="g2" />
+     width="1200"
+     height="675"
+     fill="url(#bg-ai-b)"
+     id="rect2" />
   <rect
-     width="60.765862"
-     height="60.765862"
-     rx="13.292532"
-     fill="#3b5bdb"
-     id="rect1-3"
-     style="fill:#db3b62;fill-opacity:1;stroke-width:0.949467"
-     x="27.636721"
-     y="29.738911" />
-  <path
-     d="m 56.114322,67.092616 h 3.810831 q 0.476347,0 0.820386,-0.396962 0.34403,-0.39696 0.238174,-0.873314 l -1.005637,-5.557457 q 1.05856,-0.529281 1.667235,-1.534916 0.608674,-1.005636 0.608674,-2.222984 0,-1.746628 -1.24381,-2.99044 -1.243811,-1.243811 -2.99044,-1.243811 -1.746629,0 -2.99044,1.243811 -1.243816,1.243812 -1.243816,2.99044 0,1.217348 0.608674,2.222984 0.608673,1.005635 1.667241,1.534916 l -1.005635,5.557457 q -0.105857,0.476354 0.238177,0.873314 0.344032,0.396962 0.820386,0.396962 z M 57.331669,81.64786 Q 57.0141,81.594937 56.696531,81.489075 49.551226,79.107308 45.316973,72.676537 41.08272,66.245766 41.08272,58.835823 V 48.832401 q 0,-1.323204 0.767459,-2.381767 0.767458,-1.058563 1.984806,-1.534917 l 12.702762,-4.763534 q 0.740994,-0.264641 1.481988,-0.264641 0.740992,0 1.481993,0.264641 l 12.702753,4.763534 q 1.217349,0.476354 1.984812,1.534917 0.767454,1.058563 0.767454,2.381767 v 10.003422 q 0,7.409943 -4.234251,13.840714 -4.234251,6.430771 -11.379556,8.812538 -0.317568,0.105857 -0.635137,0.158785 -0.317568,0.05293 -0.688068,0.05293 -0.370497,0 -0.688066,-0.05293 z m 0.688066,-4.181325 q 5.504532,-1.746629 9.103647,-6.986517 3.599114,-5.239887 3.599114,-11.644195 V 48.832401 L 58.019735,44.068867 45.316973,48.832401 v 10.003422 q 0,6.404308 3.599115,11.644195 3.599115,5.239888 9.103647,6.986517 z m 0,-16.725298 z"
-     id="path1-5"
-     style="fill:#ffffff;stroke-width:0.0529282" />
+     width="1200"
+     height="675"
+     fill="white"
+     filter="url(#grain-ai-b)"
+     id="rect3" />
   <text
-     x="108"
-     y="56"
-     fill="#ffffff"
-     font-family="system-ui, sans-serif"
-     font-size="26px"
+     x="459.52795"
+     y="321.92072"
+     font-family="system-ui, '-apple-system', 'Segoe UI', Roboto, sans-serif"
+     font-size="71.2413px"
      font-weight="700"
-     id="text2">PGP True E2E</text>
+     fill="#ffffff"
+     dominant-baseline="middle"
+     id="text7"
+     style="stroke-width:1.18736">PGP True End to End</text>
   <text
-     x="108.35935"
-     y="80.203255"
-     fill="#9db2ff"
-     font-family="system-ui, sans-serif"
-     font-size="14px"
-     id="text3"
-     style="fill:#db3b62;fill-opacity:1">PGP built for daily use</text>
+     x="460"
+     y="395"
+     font-family="system-ui, '-apple-system', 'Segoe UI', Roboto, sans-serif"
+     font-size="26px"
+     font-weight="400"
+     fill="#ffffff"
+     fill-opacity="0.82"
+     dominant-baseline="middle"
+     id="text8">PGP built for daily use</text>
+  <g
+     style="fill:#ffffff;fill-opacity:1"
+     id="g1"
+     transform="matrix(12.991244,0,0,12.991244,56.617441,174.82461)">
+    <path
+       d="M 12,11 5.3,6.8 Q 4.88,6.52 4.44,6.77 4,7.02 4,7.52 4,7.75 4.1,7.94 4.2,8.13 4.4,8.25 l 7.08,4.42 q 0.25,0.15 0.52,0.15 0.28,0 0.53,-0.15 L 19.6,8.25 Q 19.8,8.12 19.9,7.94 20,7.76 20,7.52 20,7.02 19.56,6.77 19.12,6.52 18.7,6.8 Z m 7,9 Q 18.57,20 18.29,19.71 18,19.43 18,19 V 16 Q 18,15.57 18.29,15.29 18.58,15.01 19,15 V 14 Q 19,13.17 19.59,12.59 20.18,12.01 21,12 21.82,11.99 22.41,12.59 23,13.18 23,14 v 1 q 0.43,0 0.71,0.29 0.28,0.29 0.29,0.71 v 3 q 0,0.43 -0.29,0.71 Q 23.42,19.99 23,20 Z m 1,-5 h 2 V 14 Q 22,13.57 21.71,13.29 21.42,13.01 21,13 20.58,12.99 20.29,13.29 20,13.59 20,14 Z M 4,20 Q 3.18,20 2.59,19.41 2,18.82 2,18 V 6 Q 2,5.18 2.59,4.59 3.18,4 4,4 H 20 Q 20.83,4 21.41,4.59 22,5.18 22,6 V 9 Q 22,9.42 21.71,9.71 21.42,10 21,10 18.93,10 17.46,11.46 16,12.93 16,15 v 4 q 0,0.43 -0.29,0.71 Q 15.42,19.99 15,20 Z"
+       id="path1-3"
+       style="fill:#ffffff;fill-opacity:1" />
+  </g>
 </svg>

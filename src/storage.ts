@@ -210,6 +210,12 @@ export async function deletePluginData(pluginId: string, accountId: string): Pro
   await txPromise<undefined>(db, PLUGINS_STORAGE, 'readwrite', (s) => s.delete(pluginId+'___'+accountId));
 }
 
+export async function getPluginsDataForAccount(accountId: string): Promise<{id: string; data: any; accountId: string; }[]>{
+  const db = await openDB();
+  const entries = await txPromise<any[]>(db, PLUGINS_STORAGE, 'readonly', (s) => s.getAll());
+  return entries.filter((entry) => entry && entry.accountId === accountId);
+}
+
 // ── Migrations Store ───────────────────────────────────────
 export async function recordMigration(version: number, description?: string): Promise<void> {
   const db = await openDB();
@@ -510,6 +516,7 @@ export async function exportPluginData(accountId?: string): Promise<void> {
     let rawKeys: KeyRecord[];
     let rawCache: EncryptedMessageCache[];
     let rawMigrations: DbMigration[] = [];
+    let rawPluginsData: any[] = [];
 
     if (accountId) {
       rawKeys = (await txPromise<KeyRecord[]>(db, KEY_RECORDS_STORE, 'readonly', (s) => s.getAll())).filter((k) => k.accountId === accountId);
@@ -523,6 +530,13 @@ export async function exportPluginData(accountId?: string): Promise<void> {
 
     if (db.objectStoreNames.contains(MIGRATIONS_STORE)) {
       rawMigrations = await txPromise<DbMigration[]>(db, MIGRATIONS_STORE, 'readonly', (s) => s.getAll());
+    }
+
+    if (db.objectStoreNames.contains(PLUGINS_STORAGE)) {
+      const allPluginsData = await txPromise<any[]>(db, PLUGINS_STORAGE, 'readonly', (s) => s.getAll());
+      rawPluginsData = accountId 
+        ? allPluginsData.filter((entry) => entry && entry.accountId === accountId)
+        : allPluginsData;
     }
 
     const serializedKeys = rawKeys.map(key => ({
@@ -551,7 +565,8 @@ export async function exportPluginData(accountId?: string): Promise<void> {
       createdAt: new Date().toISOString(),
       keys: serializedKeys,
       messageCache: serializedCache,
-      migrations: rawMigrations
+      migrations: rawMigrations,
+      pluginsStorage: rawPluginsData
     };
 
     const jsonString = JSON.stringify(backupPackage, null, 2);
@@ -630,6 +645,19 @@ export async function importPluginData(jsonContent: string, accountId?: string):
         storeMigrations.put(migration);
       }
       transactionsToWait.push(txMigrations);
+    }
+
+    if (Array.isArray(backup.pluginsStorage) && db.objectStoreNames.contains(PLUGINS_STORAGE)) {
+      const pluginsToImport = accountId
+        ? backup.pluginsStorage.filter((entry: any) => entry.accountId === accountId)
+        : backup.pluginsStorage;
+
+      const txPlugins = db.transaction(PLUGINS_STORAGE, 'readwrite');
+      const storePlugins = txPlugins.objectStore(PLUGINS_STORAGE);
+      for (const entry of pluginsToImport) {
+        storePlugins.put(entry);
+      }
+      transactionsToWait.push(txPlugins);
     }
 
     await Promise.all(

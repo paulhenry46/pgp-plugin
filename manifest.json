@@ -68,6 +68,11 @@
       "description": "Allow users to activate the persistent key feature (unlocked keys stored in indexedDB encrypted with a non extractible webCrypto key).",
       "default": false
     },
+    "forceRemoveOnLogout": {
+      "type": "boolean",
+      "label": "Remove plugin data when you log out",
+      "description": "Remove all encrypted plugin data when the user logs out.",
+    },
     "CryptpadURL": {
       "type": "string",
       "label": "Cryptpad URL",
@@ -154,9 +159,15 @@
     },
     "lockOnLogout": {
       "type": "boolean",
-      "label": "Lock keys on logout",
-      "description": "Whether to lock all keys when the user logs out. This is used only when StoreDangerous is enabled. This is useful if you want to avoid leaving unlocked keys in memory when the user logs out.",
+      "label": "Lock keys when switching accounts.",
+      "description": "Whether to lock all keys when switching accounts. This remove the dangerous storage when switching accounts.",
       "default": false
+    },
+    "removeOnLogout": {
+      "type": "boolean",
+      "label": "Remove encrypted plugin data when you log out",
+      "description": "Whether to remove all encrypted plugin data (keys, message cache, search index) when the user logs out. The unecrypted data is always removed as it is in RAM.",
+      "default": true
     },
     "generateKey": {
       "type": "select",
@@ -236,6 +247,9 @@
       "success.sent_signed_encrypted": "Message signed, encrypted and sent",
       "success.sent_encrypted": "Message encrypted and sent",
       "success.sent_signed": "Message signed and sent",
+      "warn.sent_partially_encrypted": "Message sent: encrypted for recipients with a public key, unencrypted for the others",
+      "warn.sent_not_encrypted": "Message sent unencrypted: no recipient has a public key",
+      "warn.sent_signed_not_encrypted": "Message signed and sent unencrypted: no recipient has a public key",
       "error.unsupported_layout_prefix": "Unsupported OpenPGP layout (",
       "error.unsupported_layout_suffix": ")",
       "error.unknown_public_key_prefix": "Unknown public key or missing from the keyring (Key ID: ",

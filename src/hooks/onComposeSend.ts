@@ -83,6 +83,13 @@ export async function resolveIntent(req:any) {
     sign = typeof stored.sign === 'boolean' ? stored.sign : settings().defaultSign;
     encrypt = typeof stored.encrypt === 'boolean' ? stored.encrypt : settings().defaultEncrypt;
   }
+  if ((sign || encrypt) && (await listKeyRecords()).length === 0) {
+    // No key at all: the user never set OpenPGP up. The toolbar only asks
+    // them to import a key, so the sign/encrypt defaults can't be turned
+    // off there; send plain mail. Admin policies that require a key
+    // (forceEncryption, blockUntilDefaultKeyIsAvailable) are checked apart.
+    return { sign: false, encrypt: false };
+  }
   return { sign: !!sign, encrypt: !!encrypt };
 }
 
@@ -265,7 +272,6 @@ export async function onComposeSend(req: ComposeRequest): Promise<boolean | unde
       const finalEnvelopeBlob = wrapAsPgpMimeEncrypted(encryptedBlob, {
         from, to: req.to, cc: req.cc, subject: req.subject || '', inReplyTo: req.inReplyTo, references: req.references, messageId
       });
-      host.log.info('final message text - Scenario A:', new TextDecoder().decode(await finalEnvelopeBlob.arrayBuffer()));
 
       const rawBytes = await blobToBytes(finalEnvelopeBlob);
       // allRecipientEmails includes ALL emails (To + Cc + Bcc) for SMTP/JMAP delivery
@@ -397,8 +403,6 @@ export async function onComposeSend(req: ComposeRequest): Promise<boolean | unde
       const clearBytes = await blobToBytes(clearEnvelopeBlob);
 
       // B.3: Targeted network deliveries (passing full envelope lists including Bcc)
-      host.log.info('final message text - Scenario B - PGP envelope:', new TextDecoder().decode(await pgpEnvelopeBlob.arrayBuffer()));
-      host.log.info('final message text - Scenario B - Non PGP envelope:', new TextDecoder().decode(await clearEnvelopeBlob.arrayBuffer()));
       await host.jmap.submitRaw(bytesArrayBuffer(pgpBytes), identityId, { envelopeRecipients: pgpEnvelopeRecipients });
 
       await host.jmap.submitRaw(bytesArrayBuffer(clearBytes), identityId, { envelopeRecipients: nonPgpEnvelopeRecipients });
@@ -429,10 +433,8 @@ export async function onComposeSend(req: ComposeRequest): Promise<boolean | unde
         networkEnvelopeBlob = wrapAsPgpMimeSigned(clearMimeBytesBlob, signatureBlob, {
           from, to: req.to, cc: req.cc, subject: req.subject || '', inReplyTo: req.inReplyTo, references: req.references, messageId
         });
-        host.log.info('final message text - Scenario C (with signature) - Network envelope:', new TextDecoder().decode(await networkEnvelopeBlob.arrayBuffer()));
       } else {
         networkEnvelopeBlob = new Blob([clearMimeBytesWithID as BlobPart], { type: 'application/octet-stream' });
-        host.log.info('final message text - Scenario C (no signature) - Network envelope:', new TextDecoder().decode(await networkEnvelopeBlob.arrayBuffer()));
       }
 
       // C.2: Envelope encrypted ONLY with sender's public key for the Sent folder
@@ -457,12 +459,18 @@ export async function onComposeSend(req: ComposeRequest): Promise<boolean | unde
       await host.jmap.importRaw(bytesArrayBuffer(sentBytes), ['sent']);
     }
 
-    // Confirmation toasts
-    host.toast.success(
-      encrypt && sign ? host.i18n.t('success.sent_signed_encrypted')
-        : encrypt ? host.i18n.t('success.sent_encrypted')
-          : host.i18n.t('success.sent_signed'),
-    );
+    // Confirmation toasts: report what was sent, not what was asked for.
+    // Encryption only reaches recipients with a public key: all of them in
+    // scenario A, some in B, none in C (clear or only signed on the wire).
+    if (encrypt && nonPgpRecipients.length === 0) {
+      host.toast.success(sign ? host.i18n.t('success.sent_signed_encrypted') : host.i18n.t('success.sent_encrypted'));
+    } else if (encrypt && pgpRecipients.length > 0) {
+      host.toast.warning(host.i18n.t('warn.sent_partially_encrypted'));
+    } else if (encrypt) {
+      host.toast.warning(sign ? host.i18n.t('warn.sent_signed_not_encrypted') : host.i18n.t('warn.sent_not_encrypted'));
+    } else {
+      host.toast.success(host.i18n.t('success.sent_signed'));
+    }
 
     await host.storage.set(INTENT_KEY, {});
     return false;
