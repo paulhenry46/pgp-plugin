@@ -55,6 +55,7 @@ declare module '@plugin-host' {
     success(msg: string): void;
     error(msg: string): void;
     info(msg: string): void;
+    warning(msg: string): void;
   };
   export const ui: {
     confirm(options: { title: string; message: string; danger?: boolean; confirmLabel?: string }): Promise<boolean>;
