@@ -10,6 +10,7 @@ import {
   fetchKeyFromBackground, 
   broadcastUpdateRamIndexEntry 
 } from './pgp/session-broadcast.ts';
+import { initAurionAPI } from "./aurion/utils.ts";
 
 export async function deriveAesKeyFromPgpParams(passphrase: string, salt: ArrayBuffer, iterations: number): Promise<CryptoKey> {
   const enc = new TextEncoder();
@@ -115,6 +116,7 @@ export async function indexAndPersistDecryptedMail(
       };
 
       await saveMessageCache(encryptedRecord);
+      await (await initAurionAPI()).addMessage(encryptedRecord);
 
       broadcastUpdateRamIndexEntry(mailId, decryptedPayload);
 

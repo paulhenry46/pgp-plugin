@@ -43,7 +43,7 @@ export async function changePassword(keyID: string, oldPassphrase: string, newPa
       updatedRecord.default = true;
     }
 
-    await saveKeyRecord(updatedRecord);
+    await saveKeyRecord(updatedRecord, false);
     const unlockedSession = await unlockPrivateKey(updatedRecord, newPassphrase);
     if (updatedRecord.default && unlockedSession.aesKey) {
       await changePassphraseForCache(unlockedSession.aesKey, updatedRecord.id);
