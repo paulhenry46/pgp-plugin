@@ -8,27 +8,56 @@ const CHANNEL_NAME = 'pgp-session-bus';
 
 // The unlocked keys and the decrypted index live in the background frame,
 // where activate() and every hook run. A BroadcastChannel reaches every
-// script of the webmail's origin, in every tab, not only this plugin's
-// frames: so the channel never hands out key material, previews or search
-// results. Code in the background frame reads them directly; a slot frame
-// (settings) may only push a key it unlocked and ask whether a key is
-// unlocked.
+// script of the webmail's origin, in every tab and worker, not only this
+// plugin's frames: so no key, preview or search result ever travels on the
+// channel, in either direction, and nothing received on it is stored. Code
+// in the background frame reads keys and index directly. A slot frame
+// (settings) hands over a key it unlocked by calling the background frame of
+// its own tab (see SessionHost). The channel carries the "a key changed"
+// notice, the lock request and the custom-secret API.
 let _isSessionHost = false;
 let _backgroundSessionKeys: Record<string, SessionKeysEntry> = {};
 let _ramDecryptedIndex: Record<string, { preview: string, tokens: string[] }> = {};
 
+/**
+ * What the background frame offers the plugin's other frames, as an object
+ * on its own window. Frames of one tab and one origin can call each other,
+ * so nothing is posted anywhere. It takes keys in and answers yes or no: it
+ * has no way to read a key, a preview or a search result back out.
+ */
+interface SessionHost {
+  setKey(keyEntry: SessionKeysEntry): void;
+  isUnlocked(keyId?: string): boolean;
+  initIndex(decryptedIndex: Record<string, DecryptedCachePayload>): void;
+  updateIndexEntry(id: string, payload: DecryptedCachePayload): void;
+}
+const SESSION_HOST_PROP = '__pgpSessionHost';
+
+/** The background frame of this tab, looked up among the page's frames. */
+function findSessionHost(): SessionHost | null {
+  let frames: any;
+  try {
+    frames = (globalThis as any).parent?.frames;
+  } catch {
+    return null;
+  }
+  const count = Number(frames?.length) || 0;
+  for (let i = 0; i < count; i++) {
+    try {
+      const candidate = frames[i]?.[SESSION_HOST_PROP];
+      if (candidate) return candidate as SessionHost;
+    } catch {
+      // A frame of another origin: not ours.
+    }
+  }
+  return null;
+}
+
 type SessionMessage =
-  | { type: 'PING_STATUS'; requestId: string }
-  | { type: 'PONG_STATUS'; requestId: string; isUnlocked: boolean }
-  | { type: 'SET_KEY'; keyEntry: SessionKeysEntry }
   | { type: 'KEY_UPDATED'; isUnlocked: boolean }
   | { type: 'CLEAR_KEY'; id: string }
-  | { type: 'REQUEST_KEY_STATUS'; requestId: string; keyId: string }
-  | { type: 'RESPONSE_KEY_STATUS'; requestId: string; isUnlocked: boolean }
-  | { type: 'INITIALIZE_RAM_INDEX'; decryptedIndex: Record<string, DecryptedCachePayload> }
   | { type: 'GET_RAM_INDEX'; requestId: string }
   | { type: 'RESPONSE_RAM_INDEX'; requestId: string; decryptedIndex: Record<string, DecryptedCachePayload> }
-  | { type: 'UPDATE_RAM_INDEX_ENTRY'; id: string; payload: DecryptedCachePayload }
   | { type: 'REQUEST_ADD_CUSTOM_SECRET'; requestId: string; salt: string; accountId: string; data: any }
   | { type: 'RESPONSE_ADD_CUSTOM_SECRET'; requestId: string; ok: boolean; }
   | { type: 'REQUEST_CUSTOM_SECRET'; requestId: string; salt: string; accountId: string }
@@ -42,25 +71,32 @@ function notifyKeyUpdated(isUnlocked: boolean): void {
 
 export function initBackgroundSessionListener(): void {
   _isSessionHost = true;
+
+  // structuredClone: what a slot frame hands over is copied into this frame,
+  // so it outlives the slot frame (settings closes, the keys stay).
+  const sessionHost: SessionHost = Object.freeze({
+    setKey(keyEntry: SessionKeysEntry) {
+      _backgroundSessionKeys[keyEntry.id] = structuredClone(keyEntry);
+      notifyKeyUpdated(true);
+    },
+    isUnlocked(keyId?: string) {
+      return keyId ? !!_backgroundSessionKeys[keyId] : Object.keys(_backgroundSessionKeys).length > 0;
+    },
+    initIndex(decryptedIndex: Record<string, DecryptedCachePayload>) {
+      _ramDecryptedIndex = { ..._ramDecryptedIndex, ...structuredClone(decryptedIndex) };
+    },
+    updateIndexEntry(id: string, payload: DecryptedCachePayload) {
+      _ramDecryptedIndex[id] = structuredClone(payload);
+    },
+  });
+  Object.defineProperty(globalThis, SESSION_HOST_PROP, { value: sessionHost, configurable: true });
+
   const channel = new BroadcastChannel(CHANNEL_NAME);
 
   channel.onmessage = (event: MessageEvent<SessionMessage>) => {
     const msg = event.data;
 
     switch (msg.type) {
-      case 'PING_STATUS':
-        channel.postMessage({
-          type: 'PONG_STATUS',
-          requestId: msg.requestId,
-          isUnlocked: Object.keys(_backgroundSessionKeys).length > 0
-        });
-        break;
-
-      case 'SET_KEY':
-        _backgroundSessionKeys[msg.keyEntry.id] = msg.keyEntry;
-        channel.postMessage({ type: 'KEY_UPDATED', isUnlocked: true });
-        break;
-
       case 'CLEAR_KEY':
         // remove keyId from _backgroundSessionKeys if provided, otherwise clear all keys
         if (msg.id) {
@@ -70,24 +106,7 @@ export function initBackgroundSessionListener(): void {
         }
         channel.postMessage({ type: 'KEY_UPDATED', isUnlocked: false });
         break;
-    
-      // Whether a key is unlocked, never the key itself.
-      case 'REQUEST_KEY_STATUS':
-        channel.postMessage({
-          type: 'RESPONSE_KEY_STATUS',
-          requestId: msg.requestId,
-          isUnlocked: !!_backgroundSessionKeys[msg.keyId]
-        });
-        break;
 
-      case 'INITIALIZE_RAM_INDEX':
-        // add instead of replacing to avoid overwriting existing entries and allowing for multiple keys to contribute to the index
-        _ramDecryptedIndex = { ..._ramDecryptedIndex, ...msg.decryptedIndex };
-        break;
-
-      case 'UPDATE_RAM_INDEX_ENTRY':
-      _ramDecryptedIndex[msg.id] = msg.payload;
-      break;
       case 'REQUEST_CUSTOM_SECRET': {
 
         (async () => {
@@ -152,58 +171,26 @@ export async function fetchKeyFromBackground(keyId: string): Promise<SessionKeys
   return _isSessionHost ? (_backgroundSessionKeys[keyId] || null) : null;
 }
 
-/** Whether a key is unlocked in the background frame; safe from any frame. */
-export function isKeyUnlockedInBackground(keyId: string): Promise<boolean> {
-  if (_isSessionHost) return Promise.resolve(!!_backgroundSessionKeys[keyId]);
-  return new Promise((resolve) => {
-    const channel = new BroadcastChannel(CHANNEL_NAME);
-    const requestId = Math.random().toString(36).substring(2);
-
-    const timeout = setTimeout(() => {
-      channel.close();
-      resolve(false);
-    }, 300);
-
-    channel.onmessage = (event: MessageEvent<SessionMessage>) => {
-      if (event.data.type === 'RESPONSE_KEY_STATUS' && event.data.requestId === requestId) {
-        clearTimeout(timeout);
-        channel.close();
-        resolve(event.data.isUnlocked);
-      }
-    };
-
-    channel.postMessage({ type: 'REQUEST_KEY_STATUS', requestId, keyId });
-  });
+/**
+ * Whether a key is unlocked in the background frame of this tab; safe from
+ * any frame.
+ */
+export async function isKeyUnlockedInBackground(keyId: string): Promise<boolean> {
+  if (_isSessionHost) return !!_backgroundSessionKeys[keyId];
+  return findSessionHost()?.isUnlocked(keyId) ?? false;
 }
 
-export function checkIsKeyUnlocked(): Promise<boolean> {
-  if (_isSessionHost) return Promise.resolve(Object.keys(_backgroundSessionKeys).length > 0);
-  return new Promise((resolve) => {
-    const channel = new BroadcastChannel(CHANNEL_NAME);
-    const requestId = Math.random().toString(36).substring(2);
-
-    const timeout = setTimeout(() => {
-      channel.close();
-      resolve(false);
-    }, 300);
-
-    channel.onmessage = (event: MessageEvent<SessionMessage>) => {
-      if (event.data.type === 'PONG_STATUS' && event.data.requestId === requestId) {
-        clearTimeout(timeout);
-        channel.close();
-        resolve(event.data.isUnlocked);
-      }
-    };
-
-    channel.postMessage({ type: 'PING_STATUS', requestId });
-  });
+export async function checkIsKeyUnlocked(): Promise<boolean> {
+  if (_isSessionHost) return Object.keys(_backgroundSessionKeys).length > 0;
+  return findSessionHost()?.isUnlocked() ?? false;
 }
 
 /**
  * Hands an unlocked key to the background frame. Unlocked there (startup,
- * decrypt and send prompts, persisted keys), it is stored directly and only
- * the status goes out. Unlocked in a slot frame (settings), it still has to
- * cross the channel once.
+ * decrypt and send prompts, persisted keys), it is stored directly. Unlocked
+ * in a slot frame (settings), it is passed to the background frame of the
+ * same tab by a direct call. Either way only "a key changed" goes out on the
+ * channel.
  */
 export function broadcastUnlockKey(keyEntry: SessionKeysEntry): void {
   if (_isSessionHost) {
@@ -211,9 +198,12 @@ export function broadcastUnlockKey(keyEntry: SessionKeysEntry): void {
     notifyKeyUpdated(true);
     return;
   }
-  const channel = new BroadcastChannel(CHANNEL_NAME);
-  channel.postMessage({ type: 'SET_KEY', keyEntry });
-  channel.close();
+  const sessionHost = findSessionHost();
+  if (!sessionHost) {
+    console.warn('[PGP] No background frame found in this tab: the key stays locked.');
+    return;
+  }
+  sessionHost.setKey(keyEntry);
 }
 
 export function broadcastLockKey(keyId: string): void {
@@ -244,9 +234,7 @@ export function broadcastInitializeRamIndex(decryptedIndex: Record<string, Decry
     _ramDecryptedIndex = { ..._ramDecryptedIndex, ...decryptedIndex };
     return;
   }
-  const channel = new BroadcastChannel(CHANNEL_NAME);
-  channel.postMessage({ type: 'INITIALIZE_RAM_INDEX', decryptedIndex });
-  channel.close();
+  findSessionHost()?.initIndex(decryptedIndex);
 }
 
 export function fetchRamIndexFromBackground(): Promise<Record<string, DecryptedCachePayload>> {
@@ -286,9 +274,7 @@ export function broadcastUpdateRamIndexEntry(id: string, payload: DecryptedCache
     _ramDecryptedIndex[id] = payload;
     return;
   }
-  const channel = new BroadcastChannel(CHANNEL_NAME);
-  channel.postMessage({ type: 'UPDATE_RAM_INDEX_ENTRY', id, payload });
-  channel.close();
+  findSessionHost()?.updateIndexEntry(id, payload);
 }
 
 
