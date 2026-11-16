@@ -120,3 +120,15 @@ test('without a background frame in the tab, a settings frame sends the key nowh
   assert.equal(await slot.isKeyUnlockedInBackground('k1'), false);
   globalThis.parent = { frames: [globalThis] };
 });
+
+// The webmail frames an opened message on its own origin: a window answers a
+// property name with the element of that id, so the sender's HTML can stand
+// in front of the real background frame.
+test('an element named like the background frame, in a message, is skipped', async () => {
+  const messageFrame = { __pgpSessionHost: { setKey: {}, isUnlocked: {}, initIndex: {}, updateIndexEntry: {} } };
+  globalThis.parent = { frames: [messageFrame, globalThis] };
+  slot.broadcastUnlockKey(entry('k4', 'SECRET-FOUR'));
+  assert.equal((await background.fetchKeyFromBackground('k4'))?.signingKey, 'SECRET-FOUR');
+  assert.equal(await slot.isKeyUnlockedInBackground('k4'), true);
+  globalThis.parent = { frames: [globalThis] };
+});

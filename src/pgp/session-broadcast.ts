@@ -32,8 +32,18 @@ interface SessionHost {
   updateIndexEntry(id: string, payload: DecryptedCachePayload): void;
 }
 const SESSION_HOST_PROP = '__pgpSessionHost';
+const SESSION_HOST_METHODS = ['setKey', 'isUnlocked', 'initIndex', 'updateIndexEntry'] as const;
 
-/** The background frame of this tab, looked up among the page's frames. */
+/**
+ * The background frame of this tab, looked up among the page's frames.
+ *
+ * A window also answers a property name with the element of its document
+ * that has that id or name. The webmail shows a message in a frame of its own
+ * origin (scripts off), so the sender's HTML can put an element called
+ * __pgpSessionHost in front of the real one. Markup cannot make functions:
+ * only an object whose four members are functions is taken, the rest is
+ * skipped.
+ */
 function findSessionHost(): SessionHost | null {
   let frames: any;
   try {
@@ -45,7 +55,9 @@ function findSessionHost(): SessionHost | null {
   for (let i = 0; i < count; i++) {
     try {
       const candidate = frames[i]?.[SESSION_HOST_PROP];
-      if (candidate) return candidate as SessionHost;
+      if (candidate && SESSION_HOST_METHODS.every((name) => typeof candidate[name] === 'function')) {
+        return candidate as SessionHost;
+      }
     } catch {
       // A frame of another origin: not ours.
     }
