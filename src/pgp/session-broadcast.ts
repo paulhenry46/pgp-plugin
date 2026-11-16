@@ -4,6 +4,7 @@ import { DecryptedCachePayload, getPluginData, listKeyRecords, savePluginData, S
 import { deriveSecret } from './key-utils.ts';
 import { loadDangerousPassphrases, getKeyRecord } from '../storage.ts';
 import { unlockPrivateKey } from './import.ts'; 
+
 const CHANNEL_NAME = 'pgp-session-bus';
 
 // The unlocked keys and the decrypted index live in the background frame,
@@ -19,6 +20,11 @@ let _isSessionHost = false;
 let _backgroundSessionKeys: Record<string, SessionKeysEntry> = {};
 let _ramDecryptedIndex: Record<string, { preview: string, tokens: string[] }> = {};
 
+interface CustomSecretResult {
+  secret: string | null;
+  data?: any;
+}
+
 /**
  * What the background frame offers the plugin's other frames, as an object
  * on its own window. Frames of one tab and one origin can call each other,
@@ -30,9 +36,19 @@ interface SessionHost {
   isUnlocked(keyId?: string): boolean;
   initIndex(decryptedIndex: Record<string, DecryptedCachePayload>): void;
   updateIndexEntry(id: string, payload: DecryptedCachePayload): void;
+  getCustomSecret(salt: string, accountId: string): Promise<CustomSecretResult>;
+  addCustomSecret(salt: string, accountId: string, data: any): Promise<boolean>;
 }
+
 const SESSION_HOST_PROP = '__pgpSessionHost';
-const SESSION_HOST_METHODS = ['setKey', 'isUnlocked', 'initIndex', 'updateIndexEntry'] as const;
+const SESSION_HOST_METHODS = [
+  'setKey',
+  'isUnlocked',
+  'initIndex',
+  'updateIndexEntry',
+  'getCustomSecret',
+  'addCustomSecret',
+] as const;
 
 /**
  * The background frame of this tab, looked up among the page's frames.
@@ -67,11 +83,7 @@ function findSessionHost(): SessionHost | null {
 
 type SessionMessage =
   | { type: 'KEY_UPDATED'; isUnlocked: boolean }
-  | { type: 'CLEAR_KEY'; id: string }
-  | { type: 'REQUEST_ADD_CUSTOM_SECRET'; requestId: string; salt: string; accountId: string; data: any }
-  | { type: 'RESPONSE_ADD_CUSTOM_SECRET'; requestId: string; ok: boolean; }
-  | { type: 'REQUEST_CUSTOM_SECRET'; requestId: string; salt: string; accountId: string }
-  | { type: 'RESPONSE_CUSTOM_SECRET'; requestId: string; secret: string | null; data: any | undefined; };
+  | { type: 'CLEAR_KEY'; id: string };
 
 function notifyKeyUpdated(isUnlocked: boolean): void {
   const channel = new BroadcastChannel(CHANNEL_NAME);
@@ -98,7 +110,41 @@ export function initBackgroundSessionListener(): void {
     updateIndexEntry(id: string, payload: DecryptedCachePayload) {
       _ramDecryptedIndex[id] = structuredClone(payload);
     },
+    async getCustomSecret(salt: string, accountId: string): Promise<CustomSecretResult> {
+      const allKeys = await listKeyRecords();
+      const defaultKey = allKeys.find((k) => k.default === true && k.accountId === accountId);
+
+      if (!defaultKey) {
+        return { secret: null };
+      }
+
+      const hmacKey = _backgroundSessionKeys[defaultKey.id]?.hmacKey;
+      if (!hmacKey) {
+        return { secret: null };
+      }
+
+      const secret = await deriveSecret(hmacKey, salt);
+      const data = await getPluginData(salt, accountId);
+
+      return structuredClone({ secret, data });
+    },
+    async addCustomSecret(salt: string, accountId: string, data: any): Promise<boolean> {
+      try {
+        const allKeys = await listKeyRecords();
+        const defaultKey = allKeys.find((k) => k.default === true && k.accountId === accountId);
+        const unlocked = defaultKey && _backgroundSessionKeys[defaultKey.id]?.hmacKey;
+
+        if (unlocked && !(await getPluginData(salt, accountId))) {
+          await savePluginData(salt, structuredClone(data), accountId);
+          return true;
+        }
+      } catch (e) {
+        console.error('[PGP] Error adding custom secret:', e);
+      }
+      return false;
+    },
   });
+
   Object.defineProperty(globalThis, SESSION_HOST_PROP, { value: sessionHost, configurable: true });
 
   const channel = new BroadcastChannel(CHANNEL_NAME);
@@ -106,66 +152,28 @@ export function initBackgroundSessionListener(): void {
   channel.onmessage = (event: MessageEvent<SessionMessage>) => {
     const msg = event.data;
 
-    switch (msg.type) {
-      case 'CLEAR_KEY':
-        // remove keyId from _backgroundSessionKeys if provided, otherwise clear all keys
-        if (msg.id) {
-          delete _backgroundSessionKeys[msg.id];
-        }else{
-          _backgroundSessionKeys = {};
-        }
-        channel.postMessage({ type: 'KEY_UPDATED', isUnlocked: false });
-        break;
-
-      case 'REQUEST_CUSTOM_SECRET': {
-
-        (async () => {
-        const allKeys = await listKeyRecords();
-        const defaultKey = allKeys.find((k) => k.default === true && k.accountId === msg.accountId);
-
-          if (!defaultKey) {
-            return;
-          }
-         const hmacKey = _backgroundSessionKeys[defaultKey.id]?.hmacKey;
-         if (!hmacKey) {
-            channel.postMessage({
-              type: 'RESPONSE_CUSTOM_SECRET',
-              requestId: msg.requestId,
-              secret: null
-            });
-            return;
-          }
-        const secret = await deriveSecret(hmacKey, msg.salt);
-        const data = await getPluginData(msg.salt, msg.accountId);
-        
-        channel.postMessage({
-          type: 'RESPONSE_CUSTOM_SECRET',
-          requestId: msg.requestId,
-          secret: secret,
-          data: data
-        });
-        })();
-        break;
+    if (msg.type === 'CLEAR_KEY') {
+      // remove keyId from _backgroundSessionKeys if provided, otherwise clear all keys
+      if (msg.id) {
+        delete _backgroundSessionKeys[msg.id];
+      } else {
+        _backgroundSessionKeys = {};
       }
-
-      case 'REQUEST_ADD_CUSTOM_SECRET': {
-        (async () => {
-          let ok = false;
-          try {
-            const allKeys = await listKeyRecords();
-            const defaultKey = allKeys.find(k => k.default === true && k.accountId === msg.accountId);
-            const unlocked = defaultKey && _backgroundSessionKeys[defaultKey.id]?.hmacKey;
-            if (unlocked && !(await getPluginData(msg.salt, msg.accountId))) {
-              await savePluginData(msg.salt, msg.data, msg.accountId); 
-              ok = true;
-            }
-          } catch (e) { console.error(e); }
-          channel.postMessage({ type: 'RESPONSE_ADD_CUSTOM_SECRET', requestId: msg.requestId, ok });
-        })();
-        break;
-      }
+      channel.postMessage({ type: 'KEY_UPDATED', isUnlocked: false });
     }
   };
+}
+
+export async function requestCustomSecret(salt: string, accountId: string): Promise<CustomSecretResult> {
+  const host = _isSessionHost ? (globalThis as any)[SESSION_HOST_PROP] : findSessionHost();
+  if (!host) return { secret: null };
+  return host.getCustomSecret(salt, accountId);
+}
+
+export async function requestAddCustomSecret(salt: string, accountId: string, data: any): Promise<boolean> {
+  const host = _isSessionHost ? (globalThis as any)[SESSION_HOST_PROP] : findSessionHost();
+  if (!host) return false;
+  return host.addCustomSecret(salt, accountId, data);
 }
 
 export function getBackgroundSessionKey(id: string): SessionKeysEntry | null {
@@ -229,13 +237,11 @@ export function broadcastLockKey(keyId: string): void {
 
 export function subscribeToKeyUpdates(callback: (isUnlocked: boolean) => void): () => void {
   const channel = new BroadcastChannel(CHANNEL_NAME);
-  
   channel.onmessage = (event: MessageEvent<SessionMessage>) => {
     if (event.data.type === 'KEY_UPDATED') {
       callback(event.data.isUnlocked);
     }
   };
-
   return () => channel.close();
 }
 
@@ -265,8 +271,6 @@ export function broadcastUpdateRamIndexEntry(id: string, payload: DecryptedCache
   findSessionHost()?.updateIndexEntry(id, payload);
 }
 
-
-
 export async function restoreKeysFromDangerousStorage(): Promise<void> {
   if (!settings().StoreDangerous || !(await config('allowPersistentKeys') === true)) return;
 
@@ -280,19 +284,16 @@ export async function restoreKeysFromDangerousStorage(): Promise<void> {
         if (rec) {
           // This naturally calls `getIndex` inside unlockPrivateKey and loads RAM
           const { unlockedPrivateKey, signingKey, decryptionKey, aesKey, hmacKey } = await unlockPrivateKey(rec, passphrases[keyId], true);
-
           broadcastUnlockKey({ 
-        id: rec.id, 
-        unlockedPrivateKey, 
-        signingKey, 
-        decryptionKey ,
-        aesKey: aesKey,
-        hmacKey: hmacKey
-      });
-
+            id: rec.id, 
+            unlockedPrivateKey, 
+            signingKey, 
+            decryptionKey,
+            aesKey,
+            hmacKey
+          });
         }
       }
-
       // Broadcast unlock status to other listeners
       notifyKeyUpdated(true);
     }
