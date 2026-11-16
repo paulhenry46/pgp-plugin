@@ -76,7 +76,8 @@ export async function onRenderEmailBody(body: any, ctx: any): Promise<any | unde
 
       await persistVerifyStatus(ctx.id, v.status);
       if (parsed.attachments) {
-        await scanAndImportKeysFromAttachments(parsed.attachments);
+        // Not awaited: it may ask the user a question, and the message shows first.
+        void scanAndImportKeysFromAttachments(parsed.attachments, fromEmail);
       }
 
       return {
@@ -398,7 +399,8 @@ async function handleMimeEncrypted(
   await persistVerifyStatus(ctx.id, verification);
 
   if (parsed.attachments) {
-    await scanAndImportKeysFromAttachments(parsed.attachments);
+    // Not awaited: it may ask the user a question, and the message shows first.
+    void scanAndImportKeysFromAttachments(parsed.attachments, fromEmail);
   }
    await indexAndPersistDecryptedMail(result.keyRecordAccountId, ctx.id, parsed.text ||parsed.html || '');
   return {

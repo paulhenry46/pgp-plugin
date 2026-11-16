@@ -2,6 +2,7 @@ import * as openpgp from 'openpgp';
 import { argon2id } from 'hash-wasm';
 import { ContactEmail, generateUUID, getCurrentAccountId } from '../util.ts';
 import { extractKeyInfo } from './key-utils.ts';
+import { keyAddressFor } from './key-address.ts';
 import { KeyRecord, persistPassphraseToDangerousStorage } from '../storage.ts';
 import { KDF_ITERATIONS, AES_KEY_LENGTH, settings, config } from '../shared.ts';
 import { deriveAesKeyFromPgpParams, getIndex } from '../cache.ts';
@@ -189,14 +190,32 @@ export async function unlockPrivateKey(record: KeyRecord, passphrase: string, au
   };
 }
 
-export async function importOpenPgpPublicKey(armoredPublicKeyText: string): Promise<string> {
+/**
+ * Saves a public key to the contact of an address.
+ * @param forEmail - The address the key was obtained for (the sender of the
+ *   message it came with, the address looked up). The key is then saved under
+ *   that address, and refused unless one of its User IDs carries it. Without
+ *   it (a key the user picked by hand), the key's first User ID is used.
+ */
+export async function importOpenPgpPublicKey(armoredPublicKeyText: string, forEmail?: string): Promise<string> {
   const readKey = await openpgp.readKey({ armoredKey: armoredPublicKeyText });
   const info = await extractKeyInfo(readKey);
-  
-  const email = (info.emailAddresses[0] || '').toLowerCase();
-  if (!email) throw new Error('Key has no valid email address associated');
 
-  const bytes = new TextEncoder().encode(armoredPublicKeyText);
+  let email: string;
+  if (forEmail === undefined) {
+    email = (info.emailAddresses[0] || '').toLowerCase();
+    if (!email) throw new Error('Key has no valid email address associated');
+  } else {
+    const bound = keyAddressFor(info.emailAddresses, forEmail);
+    if (!bound) throw new Error(`Key has no User ID for ${forEmail}`);
+    email = bound;
+  }
+
+  // A file can hold more than one key, and only the first is read. A key
+  // obtained for an address is saved as that one key, the one that was
+  // checked and shown to the user, not as the whole file.
+  const armoredToSave = forEmail === undefined ? armoredPublicKeyText : readKey.armor();
+  const bytes = new TextEncoder().encode(armoredToSave);
 
   const binaryString = Array.from(bytes, (byte) => String.fromCharCode(byte)).join('');
 

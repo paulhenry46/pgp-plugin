@@ -71,8 +71,8 @@
   "settingsSchema": {
     "autoImportSignerCerts": {
       "type": "boolean",
-      "label": "Auto-save signer certificates",
-      "description": "When a validly signed message is opened, remember the signer's certificate so you can later send them encrypted mail without importing it manually.",
+      "label": "Offer to save a sender's public key",
+      "description": "When a message carries its sender's public key and you have no key for them yet, ask whether to save it, so you can later send them encrypted mail without importing it manually.",
       "default": true
     },
     "encryptDrafts": {
@@ -275,6 +275,10 @@
       "confirm.mixed_recipients_title": "Mixed Recipients",
       "confirm.mixed_recipients_message": "Some recipients do not have PGP keys. Continue sending? It will break end-to-end encryption for those recipients. However, the message will still be encrypted for you and recipients with PGP keys.",
       "confirm.mixed_recipients_confirm": "Continue",
+      "confirm.save_sender_key_title": "Save this sender's public key?",
+      "confirm.save_sender_key_message": "This message carries a public key for {email}.\n\nFingerprint: {fingerprint}\n\nA sender address can be forged. Save the key only if you are sure this message comes from {email}: compare the fingerprint with them another way. Mail you encrypt to {email} will use this key.\n\nIf you cancel, keys in later messages from {email} are not offered again. You can still import one in the settings.",
+      "confirm.save_sender_key_other_addresses": "This contact also has {addresses}. Mail you encrypt to those addresses will use this key too.",
+      "confirm.save_sender_key_confirm": "Save key",
       "banner.title_security": "Message Security",
       "banner.title_both": "Encrypted & Signed",
       "banner.title_encrypted": "Encryption",
