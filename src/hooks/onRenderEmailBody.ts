@@ -415,7 +415,11 @@ async function handleMimeEncrypted(
 
 async function persistVerifyStatus(emailId: string, status: any) {
   if (!emailId) return;
- try { await host.storage.set(VERIFY_PREFIX + emailId, status); } catch { /* ignore */ }
+ try { 
+  await host.storage.set(VERIFY_PREFIX + emailId, status); 
+  const channel = new BroadcastChannel('email_banner_channel');
+  channel.postMessage({ request: 'refresh' });
+ } catch { /* ignore */ }
 }
 
 async function persistEmailListState(emailId: string, status: any) {

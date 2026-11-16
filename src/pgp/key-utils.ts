@@ -273,6 +273,7 @@ async function maybeAutoImportSigner(pub: string, senderEmail: string) {
   const sender = String(senderEmail || '').trim().toLowerCase();
   if (!sender) return;
 
+  let needToRefresh = false;
   try {
     // Anyone can attach a key to a message, under any User ID, and write any
     // address in From. So a key from a message is:
@@ -315,11 +316,15 @@ async function maybeAutoImportSigner(pub: string, senderEmail: string) {
       // for this address meanwhile (a lookup, an import by hand).
       if ((await recipientKeysFor([sender])).found[sender]) return;
       await importOpenPgpPublicKey(pub, sender);
+      needToRefresh = true;
     } finally {
       pendingKeyOffers.delete(offerId);
     }
   } catch (err) {
     host.log.warn('auto-import signer key failed', err);
+  }
+  if(needToRefresh){ 
+    host.ui.rerenderEmail();
   }
 }
 
