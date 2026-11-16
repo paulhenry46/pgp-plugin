@@ -6,6 +6,7 @@
 import * as openpgp from 'openpgp';
 import host from '@plugin-host';
 import { importOpenPgpPublicKey } from './import.ts';
+import { keyAddressFor } from './key-address.ts';
 import { contacts } from '@plugin-host';
 import { ContactCard, ContactEmail } from '../util.ts';
 import type { KeyRecord } from '../storage.ts';
@@ -249,20 +250,47 @@ export async function scanAndImportKeysFromAttachments(attachments: any[], sende
     }
 };
 
+// Answers to "save this sender's key?" are kept so a key is offered once.
+const KEY_OFFER_PREFIX = 'keyoffer:';
+const pendingKeyOffers = new Set<string>();
+
 async function maybeAutoImportSigner(pub: string, senderEmail: string) {
   if (host.plugin?.settings?.autoImportSignerCerts === false) return;
   const sender = String(senderEmail || '').trim().toLowerCase();
   if (!sender) return;
 
   try {
-    // Anyone can attach a key to a message, under any User ID. Save it only
-    // for the sender's own address (importOpenPgpPublicKey refuses a key
-    // without that User ID), and only while no key is saved for that address:
-    // a key that arrives in a message never joins or replaces one already
-    // there. A new key for a known contact is imported by hand.
+    // Anyone can attach a key to a message, under any User ID, and write any
+    // address in From. So a key from a message is:
+    // - only ever saved for the sender's own address, and only when one of
+    //   its User IDs carries that address;
+    // - only offered while no key is saved for that address: it never joins
+    //   or replaces one already there (a new key for a known contact is
+    //   imported by hand);
+    // - only saved once the user has said yes, with the fingerprint in front
+    //   of them, because nothing here proves who sent the message.
     const { found } = await recipientKeysFor([sender]);
     if (found[sender]) return;
-    await importOpenPgpPublicKey(pub, sender);
+
+    const info = await extractKeyInfo(await openpgp.readKey({ armoredKey: pub }));
+    if (!keyAddressFor(info.emailAddresses, sender)) return;
+
+    const offerId = `${KEY_OFFER_PREFIX}${sender}:${info.fingerprint}`;
+    if (pendingKeyOffers.has(offerId)) return;
+    if (await host.storage.get(offerId)) return;
+
+    pendingKeyOffers.add(offerId);
+    try {
+      const save = await host.ui.confirm({
+        title: host.i18n.t('confirm.save_sender_key_title'),
+        message: host.i18n.t('confirm.save_sender_key_message', { email: sender, fingerprint: info.fingerprint }),
+        confirmLabel: host.i18n.t('confirm.save_sender_key_confirm'),
+      });
+      await host.storage.set(offerId, save ? 'saved' : 'declined');
+      if (save) await importOpenPgpPublicKey(pub, sender);
+    } finally {
+      pendingKeyOffers.delete(offerId);
+    }
   } catch (err) {
     host.log.warn('auto-import signer key failed', err);
   }

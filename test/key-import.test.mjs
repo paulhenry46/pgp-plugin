@@ -48,6 +48,9 @@ const savedKeys = (address) => stub.contacts
 beforeEach(() => {
   stub.contacts = [];
   stub.settings = {};
+  stub.storage = {};
+  stub.confirms = [];
+  stub.confirmAnswer = true;
 });
 
 test('keyAddressFor binds a key to the expected address only', () => {
@@ -58,13 +61,29 @@ test('keyAddressFor binds a key to the expected address only', () => {
   assert.equal(keyAddressFor(['alice@example.org'], ''), null);
 });
 
-test('a key attached by the sender for their own address is saved', async () => {
+test('a key attached for the sender is saved once the user agrees', async () => {
   await scanAndImportKeysFromAttachments([keyFile(await publicKey('alice@example.org'))], 'Alice@Example.org');
+  assert.equal(stub.confirms.length, 1);
+  assert.match(stub.confirms[0].message, /"email":"alice@example.org"/);
+  assert.match(stub.confirms[0].message, /"fingerprint":"[0-9A-Fa-f:]{20,}"/);
   assert.equal(savedKeys('alice@example.org').length, 1);
 });
 
-test('a key for another address is not saved', async () => {
+// A forged From looks exactly like this to the plugin: the answer is the user's.
+test('nothing is saved when the user declines, and that key is not offered again', async () => {
+  const forged = [keyFile(await publicKey('ceo@example.com'))];
+  stub.confirmAnswer = false;
+  await scanAndImportKeysFromAttachments(forged, 'ceo@example.com');
+  assert.equal(stub.contacts.length, 0);
+  stub.confirmAnswer = true;
+  await scanAndImportKeysFromAttachments(forged, 'ceo@example.com');
+  assert.equal(stub.confirms.length, 1);
+  assert.equal(stub.contacts.length, 0);
+});
+
+test('a key for another address is not saved, and not offered', async () => {
   await scanAndImportKeysFromAttachments([keyFile(await publicKey('ceo@example.com'))], 'attacker@evil.example');
+  assert.equal(stub.confirms.length, 0);
   assert.equal(stub.contacts.length, 0);
 });
 
@@ -78,11 +97,13 @@ test('a key for the sender is saved under the sender, not its first User ID', as
 test('an attached key never joins a key already saved for the sender', async () => {
   await scanAndImportKeysFromAttachments([keyFile(await publicKey('bob@example.org'))], 'bob@example.org');
   await scanAndImportKeysFromAttachments([keyFile(await publicKey('bob@example.org'))], 'bob@example.org');
+  assert.equal(stub.confirms.length, 1);
   assert.equal(savedKeys('bob@example.org').length, 1);
 });
 
-test('nothing is saved when auto-save is off', async () => {
+test('nothing is saved or offered when the setting is off', async () => {
   stub.settings = { autoImportSignerCerts: false };
   await scanAndImportKeysFromAttachments([keyFile(await publicKey('alice@example.org'))], 'alice@example.org');
+  assert.equal(stub.confirms.length, 0);
   assert.equal(stub.contacts.length, 0);
 });
