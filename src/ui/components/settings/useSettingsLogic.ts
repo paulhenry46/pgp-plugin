@@ -475,7 +475,7 @@ export function useSettingsLogic() {
         host.toast.error(host.i18n.t('settings.error.no_key_found_directory', { email }));
         return;
       }
-      await importOpenPgpPublicKey(armored);
+      await importOpenPgpPublicKey(armored, email);
       host.toast.success(host.i18n.t('settings.success.key_imported', { email }));
       setSearchEmail('');
       await refresh();

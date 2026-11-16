@@ -183,7 +183,8 @@ export async function extractKeyInfo(key: openpgp.PublicKey | openpgp.PrivateKey
 }
 
 //  Scan of attachments from the decapsulated message
-export async function scanAndImportKeysFromAttachments(attachments: any[]) {
+//  senderEmail: the message's From address; a key is only saved for it.
+export async function scanAndImportKeysFromAttachments(attachments: any[], senderEmail: string) {
     if (!attachments || attachments.length === 0) return;
     for (const att of attachments) {
       // Target common extensions of PGP public keys or armor MIME type
@@ -239,7 +240,7 @@ export async function scanAndImportKeysFromAttachments(attachments: any[]) {
 
           // If the file contains the standard armor, attempt import
           if (contentStr && contentStr.includes('-----BEGIN PGP PUBLIC KEY BLOCK-----')) {
-            await maybeAutoImportSigner(contentStr);
+            await maybeAutoImportSigner(contentStr, senderEmail);
           }
         } catch (attErr) {
           host.log.warn(`[PGP] Failed to read attachment ${att.name}`, attErr);
@@ -248,12 +249,20 @@ export async function scanAndImportKeysFromAttachments(attachments: any[]) {
     }
 };
 
-async function maybeAutoImportSigner(pub:string) {
+async function maybeAutoImportSigner(pub: string, senderEmail: string) {
   if (host.plugin?.settings?.autoImportSignerCerts === false) return;
-  const cert = pub; // Keep .signerCert for UI semantic compatibility
- 
+  const sender = String(senderEmail || '').trim().toLowerCase();
+  if (!sender) return;
+
   try {
-     const email =  await importOpenPgpPublicKey(cert);
+    // Anyone can attach a key to a message, under any User ID. Save it only
+    // for the sender's own address (importOpenPgpPublicKey refuses a key
+    // without that User ID), and only while no key is saved for that address:
+    // a key that arrives in a message never joins or replaces one already
+    // there. A new key for a known contact is imported by hand.
+    const { found } = await recipientKeysFor([sender]);
+    if (found[sender]) return;
+    await importOpenPgpPublicKey(pub, sender);
   } catch (err) {
     host.log.warn('auto-import signer key failed', err);
   }
