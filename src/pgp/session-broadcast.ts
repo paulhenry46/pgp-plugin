@@ -6,6 +6,14 @@ import { loadDangerousPassphrases, getKeyRecord } from '../storage.ts';
 import { unlockPrivateKey } from './import.ts'; 
 const CHANNEL_NAME = 'pgp-session-bus';
 
+// The unlocked keys and the decrypted index live in the background frame,
+// where activate() and every hook run. A BroadcastChannel reaches every
+// script of the webmail's origin, in every tab, not only this plugin's
+// frames: so the channel never hands out key material, previews or search
+// results. Code in the background frame reads them directly; a slot frame
+// (settings) may only push a key it unlocked and ask whether a key is
+// unlocked.
+let _isSessionHost = false;
 let _backgroundSessionKeys: Record<string, SessionKeysEntry> = {};
 let _ramDecryptedIndex: Record<string, { preview: string, tokens: string[] }> = {};
 
@@ -15,22 +23,25 @@ type SessionMessage =
   | { type: 'SET_KEY'; keyEntry: SessionKeysEntry }
   | { type: 'KEY_UPDATED'; isUnlocked: boolean }
   | { type: 'CLEAR_KEY'; id: string }
-  | { type: 'REQUEST_KEY_DATA'; requestId: string; keyId: string }
-  | { type: 'RESPONSE_KEY_DATA'; requestId: string; keyEntry: SessionKeysEntry | null }
+  | { type: 'REQUEST_KEY_STATUS'; requestId: string; keyId: string }
+  | { type: 'RESPONSE_KEY_STATUS'; requestId: string; isUnlocked: boolean }
   | { type: 'INITIALIZE_RAM_INDEX'; decryptedIndex: Record<string, DecryptedCachePayload> }
   | { type: 'GET_RAM_INDEX'; requestId: string }
   | { type: 'RESPONSE_RAM_INDEX'; requestId: string; decryptedIndex: Record<string, DecryptedCachePayload> }
-  | { type: 'REQUEST_PREVIEWS_BATCH'; requestId: string; emailIds: string[] }
-  | { type: 'RESPONSE_PREVIEWS_BATCH'; requestId: string; previews: Record<string, string> }
-  | { type: 'REQUEST_SEARCH'; requestId: string; query: string }
-  | { type: 'RESPONSE_SEARCH'; requestId: string; matchingIds: string[] }
   | { type: 'UPDATE_RAM_INDEX_ENTRY'; id: string; payload: DecryptedCachePayload }
   | { type: 'REQUEST_ADD_CUSTOM_SECRET'; requestId: string; salt: string; accountId: string; data: any }
   | { type: 'RESPONSE_ADD_CUSTOM_SECRET'; requestId: string; ok: boolean; }
   | { type: 'REQUEST_CUSTOM_SECRET'; requestId: string; salt: string; accountId: string }
   | { type: 'RESPONSE_CUSTOM_SECRET'; requestId: string; secret: string | null; data: any | undefined; };
 
+function notifyKeyUpdated(isUnlocked: boolean): void {
+  const channel = new BroadcastChannel(CHANNEL_NAME);
+  channel.postMessage({ type: 'KEY_UPDATED', isUnlocked });
+  channel.close();
+}
+
 export function initBackgroundSessionListener(): void {
+  _isSessionHost = true;
   const channel = new BroadcastChannel(CHANNEL_NAME);
 
   channel.onmessage = (event: MessageEvent<SessionMessage>) => {
@@ -60,11 +71,12 @@ export function initBackgroundSessionListener(): void {
         channel.postMessage({ type: 'KEY_UPDATED', isUnlocked: false });
         break;
     
-      case 'REQUEST_KEY_DATA':
+      // Whether a key is unlocked, never the key itself.
+      case 'REQUEST_KEY_STATUS':
         channel.postMessage({
-          type: 'RESPONSE_KEY_DATA',
+          type: 'RESPONSE_KEY_STATUS',
           requestId: msg.requestId,
-          keyEntry: _backgroundSessionKeys[msg.keyId] || null
+          isUnlocked: !!_backgroundSessionKeys[msg.keyId]
         });
         break;
 
@@ -73,23 +85,6 @@ export function initBackgroundSessionListener(): void {
         _ramDecryptedIndex = { ..._ramDecryptedIndex, ...msg.decryptedIndex };
         break;
 
-      case 'REQUEST_PREVIEWS_BATCH': {
-        channel.postMessage({
-          type: 'RESPONSE_PREVIEWS_BATCH',
-          requestId: msg.requestId,
-          previews: getPreview(msg.emailIds, _ramDecryptedIndex)
-        });
-        break;
-      }
-
-      case 'REQUEST_SEARCH': {
-        channel.postMessage({
-          type: 'RESPONSE_SEARCH',
-          requestId: msg.requestId,
-          matchingIds: search(msg.query, _ramDecryptedIndex)
-        });
-        break;
-      }
       case 'UPDATE_RAM_INDEX_ENTRY':
       _ramDecryptedIndex[msg.id] = msg.payload;
       break;
@@ -148,29 +143,41 @@ export function getBackgroundSessionKey(id: string): SessionKeysEntry | null {
   return _backgroundSessionKeys[id] || null;
 }
 
-export function fetchKeyFromBackground(keyId: string): Promise<SessionKeysEntry | null> {
+/**
+ * The unlocked key, for code running in the background frame (hooks). The
+ * key never crosses the channel, so a slot frame gets null: use
+ * isKeyUnlockedInBackground() there.
+ */
+export async function fetchKeyFromBackground(keyId: string): Promise<SessionKeysEntry | null> {
+  return _isSessionHost ? (_backgroundSessionKeys[keyId] || null) : null;
+}
+
+/** Whether a key is unlocked in the background frame; safe from any frame. */
+export function isKeyUnlockedInBackground(keyId: string): Promise<boolean> {
+  if (_isSessionHost) return Promise.resolve(!!_backgroundSessionKeys[keyId]);
   return new Promise((resolve) => {
     const channel = new BroadcastChannel(CHANNEL_NAME);
     const requestId = Math.random().toString(36).substring(2);
 
     const timeout = setTimeout(() => {
       channel.close();
-      resolve(null);
+      resolve(false);
     }, 300);
 
     channel.onmessage = (event: MessageEvent<SessionMessage>) => {
-      if (event.data.type === 'RESPONSE_KEY_DATA' && event.data.requestId === requestId) {
+      if (event.data.type === 'RESPONSE_KEY_STATUS' && event.data.requestId === requestId) {
         clearTimeout(timeout);
         channel.close();
-        resolve(event.data.keyEntry);
+        resolve(event.data.isUnlocked);
       }
     };
 
-    channel.postMessage({ type: 'REQUEST_KEY_DATA', requestId, keyId });
+    channel.postMessage({ type: 'REQUEST_KEY_STATUS', requestId, keyId });
   });
 }
 
 export function checkIsKeyUnlocked(): Promise<boolean> {
+  if (_isSessionHost) return Promise.resolve(Object.keys(_backgroundSessionKeys).length > 0);
   return new Promise((resolve) => {
     const channel = new BroadcastChannel(CHANNEL_NAME);
     const requestId = Math.random().toString(36).substring(2);
@@ -192,13 +199,29 @@ export function checkIsKeyUnlocked(): Promise<boolean> {
   });
 }
 
+/**
+ * Hands an unlocked key to the background frame. Unlocked there (startup,
+ * decrypt and send prompts, persisted keys), it is stored directly and only
+ * the status goes out. Unlocked in a slot frame (settings), it still has to
+ * cross the channel once.
+ */
 export function broadcastUnlockKey(keyEntry: SessionKeysEntry): void {
+  if (_isSessionHost) {
+    _backgroundSessionKeys[keyEntry.id] = keyEntry;
+    notifyKeyUpdated(true);
+    return;
+  }
   const channel = new BroadcastChannel(CHANNEL_NAME);
   channel.postMessage({ type: 'SET_KEY', keyEntry });
   channel.close();
 }
 
 export function broadcastLockKey(keyId: string): void {
+  if (_isSessionHost) {
+    delete _backgroundSessionKeys[keyId];
+    notifyKeyUpdated(false);
+    return;
+  }
   const channel = new BroadcastChannel(CHANNEL_NAME);
   channel.postMessage({ type: 'CLEAR_KEY', id: keyId });
   channel.close();
@@ -217,6 +240,10 @@ export function subscribeToKeyUpdates(callback: (isUnlocked: boolean) => void): 
 }
 
 export function broadcastInitializeRamIndex(decryptedIndex: Record<string, DecryptedCachePayload>): void {
+  if (_isSessionHost) {
+    _ramDecryptedIndex = { ..._ramDecryptedIndex, ...decryptedIndex };
+    return;
+  }
   const channel = new BroadcastChannel(CHANNEL_NAME);
   channel.postMessage({ type: 'INITIALIZE_RAM_INDEX', decryptedIndex });
   channel.close();
@@ -244,53 +271,21 @@ export function fetchRamIndexFromBackground(): Promise<Record<string, DecryptedC
   });
 }
 
-export function fetchPreviewsBatchFromBackground(emailIds: string[]): Promise<Record<string, string>> {
-  return new Promise((resolve) => {
-    const channel = new BroadcastChannel(CHANNEL_NAME);
-    const requestId = Math.random().toString(36).substring(2);
-
-    const timeout = setTimeout(() => {
-      channel.close();
-      resolve({});
-    }, 300); // Protection anti-blocage
-
-    channel.onmessage = (event: MessageEvent<SessionMessage>) => {
-      const msg = event.data;
-      if (msg.type === 'RESPONSE_PREVIEWS_BATCH' && msg.requestId === requestId) {
-        clearTimeout(timeout);
-        channel.close();
-        resolve(msg.previews);
-      }
-    };
-
-    channel.postMessage({ type: 'REQUEST_PREVIEWS_BATCH', requestId, emailIds });
-  });
+// Previews and search read decrypted mail: background frame only (the
+// onEmailsFetched and onSearchResults hooks), never over the channel.
+export async function fetchPreviewsBatchFromBackground(emailIds: string[]): Promise<Record<string, string>> {
+  return _isSessionHost ? getPreview(emailIds, _ramDecryptedIndex) : {};
 }
 
-export function executeSearchInBackground(query: string): Promise<string[]> {
-  return new Promise((resolve) => {
-    const channel = new BroadcastChannel(CHANNEL_NAME);
-    const requestId = Math.random().toString(36).substring(2);
-
-    const timeout = setTimeout(() => {
-      channel.close();
-      resolve([]);
-    }, 500);
-
-    channel.onmessage = (event: MessageEvent<SessionMessage>) => {
-      const msg = event.data;
-      if (msg.type === 'RESPONSE_SEARCH' && msg.requestId === requestId) {
-        clearTimeout(timeout);
-        channel.close();
-        resolve(msg.matchingIds);
-      }
-    };
-
-    channel.postMessage({ type: 'REQUEST_SEARCH', requestId, query });
-  });
+export async function executeSearchInBackground(query: string): Promise<string[]> {
+  return _isSessionHost ? search(query, _ramDecryptedIndex) : [];
 }
 
 export function broadcastUpdateRamIndexEntry(id: string, payload: DecryptedCachePayload): void {
+  if (_isSessionHost) {
+    _ramDecryptedIndex[id] = payload;
+    return;
+  }
   const channel = new BroadcastChannel(CHANNEL_NAME);
   channel.postMessage({ type: 'UPDATE_RAM_INDEX_ENTRY', id, payload });
   channel.close();
@@ -325,9 +320,7 @@ export async function restoreKeysFromDangerousStorage(): Promise<void> {
       }
 
       // Broadcast unlock status to other listeners
-      const channel = new BroadcastChannel(CHANNEL_NAME);
-      channel.postMessage({ type: 'KEY_UPDATED', isUnlocked: true });
-      channel.close();
+      notifyKeyUpdated(true);
     }
   } catch (err) {
     console.error('Failed to auto-unlock keys from dangerous storage:', err);
