@@ -23,11 +23,9 @@ export async function deriveAesKeyFromPgpParams(passphrase: string, salt: ArrayB
   );
 }
 
-export async function getIndex(aesKey: CryptoKey, record: KeyRecord): Promise<void> {
-      try {
-        let allEncryptedCache = await getAllMessageCache();
+export async function getIndexWithoutBroadcast(aesKey: CryptoKey, record: KeyRecord): Promise<Record<string, DecryptedCachePayload>> {
+      let allEncryptedCache = await getAllMessageCache();
         allEncryptedCache = allEncryptedCache.filter((item) => item.keyRecordId === record.id);
-
         const decryptedIndexMemory: Record<string, DecryptedCachePayload> = {};
         await Promise.all(
           allEncryptedCache.map(async (item) => {
@@ -46,14 +44,14 @@ export async function getIndex(aesKey: CryptoKey, record: KeyRecord): Promise<vo
             }
           })
         );
-        broadcastInitializeRamIndex(decryptedIndexMemory);
-    
-      } catch (dbErr) {
-        throw new Error('Failed to load or decrypt the message cache: ' + (dbErr instanceof Error ? dbErr.message : String(dbErr)));
-      }
 
-      return 
+      return decryptedIndexMemory
+}
 
+export async function getIndex(aesKey: CryptoKey, record: KeyRecord): Promise<void> {
+     const index = await getIndexWithoutBroadcast(aesKey, record)
+      broadcastInitializeRamIndex(index);
+      return ;
 }
 
 

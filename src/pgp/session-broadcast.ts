@@ -68,8 +68,6 @@ function findSessionHost(): SessionHost | null {
 type SessionMessage =
   | { type: 'KEY_UPDATED'; isUnlocked: boolean }
   | { type: 'CLEAR_KEY'; id: string }
-  | { type: 'GET_RAM_INDEX'; requestId: string }
-  | { type: 'RESPONSE_RAM_INDEX'; requestId: string; decryptedIndex: Record<string, DecryptedCachePayload> }
   | { type: 'REQUEST_ADD_CUSTOM_SECRET'; requestId: string; salt: string; accountId: string; data: any }
   | { type: 'RESPONSE_ADD_CUSTOM_SECRET'; requestId: string; ok: boolean; }
   | { type: 'REQUEST_CUSTOM_SECRET'; requestId: string; salt: string; accountId: string }
@@ -247,28 +245,6 @@ export function broadcastInitializeRamIndex(decryptedIndex: Record<string, Decry
     return;
   }
   findSessionHost()?.initIndex(decryptedIndex);
-}
-
-export function fetchRamIndexFromBackground(): Promise<Record<string, DecryptedCachePayload>> {
-  return new Promise((resolve) => {
-    const channel = new BroadcastChannel(CHANNEL_NAME);
-    const requestId = Math.random().toString(36).substring(2);
-
-    const timeout = setTimeout(() => {
-      channel.close();
-      resolve({});
-    }, 1000);
-
-    channel.onmessage = (event: MessageEvent<SessionMessage>) => {
-      if (event.data.type === 'RESPONSE_RAM_INDEX' && event.data.requestId === requestId) {
-        clearTimeout(timeout);
-        channel.close();
-        resolve(event.data.decryptedIndex);
-      }
-    };
-
-    channel.postMessage({ type: 'GET_RAM_INDEX', requestId });
-  });
 }
 
 // Previews and search read decrypted mail: background frame only (the
