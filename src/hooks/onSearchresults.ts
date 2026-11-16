@@ -7,7 +7,7 @@ interface SearchInput {
         filters: any 
 }
 
-export async function onSearchResults(input: SearchInput): Promise<SearchInput>{
+export async function onSearchResults(string: string[], input: SearchInput): Promise<any[]>{
     input.newEmailIds = await executeSearchInBackground(input.query);
-    return input;
+    return input.newEmailIds;
 }
