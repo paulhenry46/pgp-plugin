@@ -250,9 +250,23 @@ export async function scanAndImportKeysFromAttachments(attachments: any[], sende
     }
 };
 
-// Answers to "save this sender's key?" are kept so a key is offered once.
+// A "no" to "save this sender's key?" is kept per address: it ends the offers
+// for that address, whatever key the next message carries.
 const KEY_OFFER_PREFIX = 'keyoffer:';
 const pendingKeyOffers = new Set<string>();
+
+/**
+ * The other addresses of the contact an address belongs to. Keys are kept per
+ * contact, so a key saved for one address is used for these too.
+ */
+async function otherAddressesOfContact(email: string): Promise<string[]> {
+  const results: ContactCard[] = await contacts.search(email);
+  const addressesOf = (c: ContactCard) =>
+    Object.values((c.emails || {}) as Record<string, ContactEmail>).map((e) => String(e.address || '').toLowerCase());
+  const contact = results.find((c) => addressesOf(c).includes(email));
+  if (!contact) return [];
+  return [...new Set(addressesOf(contact).filter((address) => address && address !== email))];
+}
 
 async function maybeAutoImportSigner(pub: string, senderEmail: string) {
   if (host.plugin?.settings?.autoImportSignerCerts === false) return;
@@ -268,22 +282,29 @@ async function maybeAutoImportSigner(pub: string, senderEmail: string) {
     //   or replaces one already there (a new key for a known contact is
     //   imported by hand);
     // - only saved once the user has said yes, with the fingerprint in front
-    //   of them, because nothing here proves who sent the message.
+    //   of them, because nothing here proves who sent the message;
+    // - not offered again for an address once the user has said no: a sender
+    //   cannot keep asking with a new key in each message.
     const { found } = await recipientKeysFor([sender]);
     if (found[sender]) return;
 
     const info = await extractKeyInfo(await openpgp.readKey({ armoredKey: pub }));
     if (!keyAddressFor(info.emailAddresses, sender)) return;
 
-    const offerId = `${KEY_OFFER_PREFIX}${sender}:${info.fingerprint}`;
+    const offerId = `${KEY_OFFER_PREFIX}${sender}`;
     if (pendingKeyOffers.has(offerId)) return;
     if (await host.storage.get(offerId)) return;
 
     pendingKeyOffers.add(offerId);
     try {
+      let message = host.i18n.t('confirm.save_sender_key_message', { email: sender, fingerprint: info.fingerprint });
+      const others = await otherAddressesOfContact(sender);
+      if (others.length > 0) {
+        message += `\n\n${host.i18n.t('confirm.save_sender_key_other_addresses', { addresses: others.join(', ') })}`;
+      }
       const save = await host.ui.confirm({
         title: host.i18n.t('confirm.save_sender_key_title'),
-        message: host.i18n.t('confirm.save_sender_key_message', { email: sender, fingerprint: info.fingerprint }),
+        message,
         confirmLabel: host.i18n.t('confirm.save_sender_key_confirm'),
       });
       if (!save) {
@@ -294,8 +315,6 @@ async function maybeAutoImportSigner(pub: string, senderEmail: string) {
       // for this address meanwhile (a lookup, an import by hand).
       if ((await recipientKeysFor([sender])).found[sender]) return;
       await importOpenPgpPublicKey(pub, sender);
-      // Noted only once the key is in: a failed save is offered again.
-      await host.storage.set(offerId, 'saved');
     } finally {
       pendingKeyOffers.delete(offerId);
     }

@@ -70,15 +70,31 @@ test('a key attached for the sender is saved once the user agrees', async () => 
 });
 
 // A forged From looks exactly like this to the plugin: the answer is the user's.
-test('nothing is saved when the user declines, and that key is not offered again', async () => {
-  const forged = [keyFile(await publicKey('ceo@example.com'))];
+test('nothing is saved when the user declines, and no key is offered for that address again', async () => {
   stub.confirmAnswer = false;
-  await scanAndImportKeysFromAttachments(forged, 'ceo@example.com');
+  await scanAndImportKeysFromAttachments([keyFile(await publicKey('ceo@example.com'))], 'ceo@example.com');
   assert.equal(stub.contacts.length, 0);
+  // The sender tries again with another key: it is not even asked about.
   stub.confirmAnswer = true;
-  await scanAndImportKeysFromAttachments(forged, 'ceo@example.com');
+  await scanAndImportKeysFromAttachments([keyFile(await publicKey('ceo@example.com'))], 'ceo@example.com');
   assert.equal(stub.confirms.length, 1);
   assert.equal(stub.contacts.length, 0);
+  // Another address is not affected.
+  await scanAndImportKeysFromAttachments([keyFile(await publicKey('alice@example.org'))], 'alice@example.org');
+  assert.equal(stub.confirms.length, 2);
+  assert.equal(savedKeys('alice@example.org').length, 1);
+});
+
+test('the question names the other addresses of the contact that will use the key', async () => {
+  stub.contacts = [{
+    id: 'c1',
+    emails: { work: { address: 'Boss@Company.example' }, home: { address: 'boss@home.example' } },
+  }];
+  await scanAndImportKeysFromAttachments([keyFile(await publicKey('boss@home.example'))], 'boss@home.example');
+  assert.match(stub.confirms[0].message, /confirm.save_sender_key_other_addresses {"addresses":"boss@company.example"}/);
+  // Without other addresses, the sentence is left out.
+  await scanAndImportKeysFromAttachments([keyFile(await publicKey('alice@example.org'))], 'alice@example.org');
+  assert.doesNotMatch(stub.confirms[1].message, /other_addresses/);
 });
 
 test('a key for another address is not saved, and not offered', async () => {
