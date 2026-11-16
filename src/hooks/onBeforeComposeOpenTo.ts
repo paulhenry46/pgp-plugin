@@ -61,7 +61,6 @@ export async function common(email: Email, withAttachments: boolean): Promise<Em
     let processedAttachments: any[] = [];
 
     if (withAttachments && attachments.length > 0) {
-        console.log('Attachments to process:', attachments);
         const shouldEncrypt = Boolean(settings().encryptDrafts) || Boolean(await config('forceDraftAndAttachmentsEncryption'));
         let encryptionKey: string | undefined = undefined;
 
@@ -117,7 +116,6 @@ export async function common(email: Email, withAttachments: boolean): Promise<Em
         subParts: subParts,
     } as any;
 
-    console.log('Updated email after processing:', updatedEmail);
     return updatedEmail;
 }
 
