@@ -211,7 +211,11 @@ export async function importOpenPgpPublicKey(armoredPublicKeyText: string, forEm
     email = bound;
   }
 
-  const bytes = new TextEncoder().encode(armoredPublicKeyText);
+  // A file can hold more than one key, and only the first is read. A key
+  // obtained for an address is saved as that one key, the one that was
+  // checked and shown to the user, not as the whole file.
+  const armoredToSave = forEmail === undefined ? armoredPublicKeyText : readKey.armor();
+  const bytes = new TextEncoder().encode(armoredToSave);
 
   const binaryString = Array.from(bytes, (byte) => String.fromCharCode(byte)).join('');
 

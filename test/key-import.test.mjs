@@ -107,3 +107,39 @@ test('nothing is saved or offered when the setting is off', async () => {
   assert.equal(stub.confirms.length, 0);
   assert.equal(stub.contacts.length, 0);
 });
+
+test('a file with two keys is saved as the one key that was shown', async () => {
+  const shown = await publicKey('dave@example.org');
+  const hidden = await publicKey('someone@else.example');
+  await scanAndImportKeysFromAttachments([keyFile(`${shown}\n${hidden}`)], 'dave@example.org');
+  const [saved] = savedKeys('dave@example.org');
+  const armored = Buffer.from(saved.uri.split(',')[1], 'base64').toString();
+  const keys = await openpgp.readKeys({ armoredKeys: armored });
+  assert.equal(keys.length, 1);
+  assert.equal(keys[0].getFingerprint(), (await openpgp.readKey({ armoredKey: shown })).getFingerprint());
+  assert.equal(armored.match(/BEGIN PGP PUBLIC KEY BLOCK/g).length, 1);
+});
+
+test('a key saved for the sender while the question is open is not joined', async () => {
+  const earlier = await publicKey('erin@example.org');
+  // The user answers yes, but a key reached the contact in the meantime.
+  Object.defineProperty(stub, 'confirmAnswer', {
+    configurable: true,
+    get() {
+      stub.contacts.push({
+        id: 'c9',
+        emails: { p: { address: 'erin@example.org' } },
+        cryptoKeys: { first: { uri: `data:application/pgp-keys;base64,${Buffer.from(earlier).toString('base64')}`, mediaType: 'application/pgp-keys' } },
+      });
+      return true;
+    },
+  });
+  try {
+    await scanAndImportKeysFromAttachments([keyFile(await publicKey('erin@example.org'))], 'erin@example.org');
+  } finally {
+    Object.defineProperty(stub, 'confirmAnswer', { configurable: true, writable: true, value: true });
+  }
+  assert.equal(stub.confirms.length, 1);
+  assert.deepEqual(Object.keys(stub.contacts[0].cryptoKeys), ['first']);
+  assert.equal(savedKeys('erin@example.org').length, 1);
+});

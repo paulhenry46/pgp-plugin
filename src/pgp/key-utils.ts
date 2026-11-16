@@ -286,8 +286,16 @@ async function maybeAutoImportSigner(pub: string, senderEmail: string) {
         message: host.i18n.t('confirm.save_sender_key_message', { email: sender, fingerprint: info.fingerprint }),
         confirmLabel: host.i18n.t('confirm.save_sender_key_confirm'),
       });
-      await host.storage.set(offerId, save ? 'saved' : 'declined');
-      if (save) await importOpenPgpPublicKey(pub, sender);
+      if (!save) {
+        await host.storage.set(offerId, 'declined');
+        return;
+      }
+      // The question can stay open for a while: a key may have been saved
+      // for this address meanwhile (a lookup, an import by hand).
+      if ((await recipientKeysFor([sender])).found[sender]) return;
+      await importOpenPgpPublicKey(pub, sender);
+      // Noted only once the key is in: a failed save is offered again.
+      await host.storage.set(offerId, 'saved');
     } finally {
       pendingKeyOffers.delete(offerId);
     }
