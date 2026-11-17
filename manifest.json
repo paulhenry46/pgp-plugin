@@ -71,7 +71,7 @@
     "forceRemoveOnLogout": {
       "type": "boolean",
       "label": "Remove plugin data when you log out",
-      "description": "Remove all encrypted plugin data when the user logs out.",
+      "description": "Remove all encrypted plugin data when the user logs out."
     },
     "CryptpadURL": {
       "type": "string",
