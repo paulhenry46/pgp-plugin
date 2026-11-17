@@ -1,79 +1,100 @@
 import host from '@plugin-host';
+
 export const CHANNEL_NAME = 'aurion-session-bus';
 
+const AURION_HOST_PROP = '__aurionSessionHost';
+const AURION_HOST_METHODS = ['setMasterPass', 'getMasterPass', 'clearMasterPass'] as const;
+
+let _isAurionSessionHost = false;
 let _masterPass: string | undefined = undefined;
 
-type SessionMessage =
-  { type: 'INITIALIZE_MASTER_PASS'; masterPass: string }// This is called if a secret is detected, i.e. the user has tape its password a fosrt time to connect AURION
-  | { type: 'REQUEST_MASTER_PASS'; requestId: string; }// AURION
-  | { type: 'RESPONSE_MASTER_PASS'; requestId: string; masterPass: string | undefined  }// AURION
-  | { type: 'LOGOUT_REQUEST'; requestId: string; }// AURION
-  | { type: 'RESPONSE_LOGOUT_REQUEST'; requestId: string;   };// AURION
+interface AurionSessionHost {
+  setMasterPass(masterPass: string): void;
+  getMasterPass(): string | undefined;
+  clearMasterPass(): void;
+}
 
+type SessionMessage =
+  | { type: 'LOGOUT_REQUEST'; requestId: string }
+  | { type: 'RESPONSE_LOGOUT_REQUEST'; requestId: string };
+
+function findAurionSessionHost(): AurionSessionHost | null {
+  let frames: any;
+  try {
+    frames = (globalThis as any).parent?.frames;
+  } catch {
+    return null;
+  }
+
+  const count = Number(frames?.length) || 0;
+  for (let i = 0; i < count; i++) {
+    try {
+      const candidate = frames[i]?.[AURION_HOST_PROP];
+      if (candidate && AURION_HOST_METHODS.every((name) => typeof candidate[name] === 'function')) {
+        return candidate as AurionSessionHost;
+      }
+    } catch {
+    }
+  }
+  return null;
+}
 
 export function initAurionBackgroundSessionListener(): void {
+  _isAurionSessionHost = true;
+
+  const sessionHost: AurionSessionHost = Object.freeze({
+    setMasterPass(masterPass: string) {
+      _masterPass = masterPass;
+    },
+    getMasterPass(): string | undefined {
+      return _masterPass;
+    },
+    clearMasterPass() {
+      _masterPass = undefined;
+    },
+  });
+
+  Object.defineProperty(globalThis, AURION_HOST_PROP, {
+    value: sessionHost,
+    configurable: true,
+  });
+
   const channel = new BroadcastChannel(CHANNEL_NAME);
 
   channel.onmessage = (event: MessageEvent<SessionMessage>) => {
     const msg = event.data;
 
-    switch (msg.type) {
-     
-      case 'INITIALIZE_MASTER_PASS':
-        _masterPass = msg.masterPass;
-        break;
-      case 'REQUEST_MASTER_PASS': {
-        
-        channel.postMessage({
-          type: 'RESPONSE_MASTER_PASS',
-          requestId: msg.requestId,
-          masterPass: _masterPass
-        });
-        break;
-      }
-      case 'LOGOUT_REQUEST': {
-        console.log('logout request received');
-        channel.postMessage({
-          type: 'RESPONSE_LOGOUT_REQUEST',
-          requestId: msg.requestId
-        });
-        host.storage.set('logoutAsked', Date.now());
-        host.storage.set('forceLogout', Date.now());
-        host.user.logout();
-        break;
-      }
+    if (msg.type === 'LOGOUT_REQUEST') {
+      console.log('logout request received');
+      _masterPass = undefined;
+      channel.postMessage({
+        type: 'RESPONSE_LOGOUT_REQUEST',
+        requestId: msg.requestId,
+      });
+      host.storage.set('logoutAsked', Date.now());
+      host.storage.set('forceLogout', Date.now());
+      host.user.logout();
     }
   };
 }
 
 export function broadcastInitializeMasterPass(masterPass: string): void {
-  const channel = new BroadcastChannel(CHANNEL_NAME);
-  console.log("broadcastInitializeMasterPass: broadcasting masterPass to background");
-  channel.postMessage({ type: 'INITIALIZE_MASTER_PASS', masterPass });
-  channel.close();
+  if (_isAurionSessionHost) {
+    _masterPass = masterPass;
+    return;
+  }
+
+  const sessionHost = findAurionSessionHost();
+  if (!sessionHost) {
+    console.warn('[Aurion] No background frame found in this tab: masterPass not stored.');
+    return;
+  }
+  sessionHost.setMasterPass(masterPass);
 }
 
-export function getMasterPass(): Promise<string | undefined> {
-    console.log("getMasterPass: requesting masterPass from background");
-  return new Promise((resolve) => {
-    const channel = new BroadcastChannel(CHANNEL_NAME);
-    const requestId = Math.random().toString(36).substring(2);
-
-    const timeout = setTimeout(() => {
-      channel.close();
-      resolve(undefined);
-    }, 300); // Protection anti-blocage
-
-    channel.onmessage = (event: MessageEvent<SessionMessage>) => {
-      const msg = event.data;
-      if (msg.type === 'RESPONSE_MASTER_PASS' && msg.requestId === requestId) {
-        clearTimeout(timeout);
-        channel.close();
-        console.log("getMasterPass: received masterPass from background:", msg.masterPass);
-        resolve(msg.masterPass);
-      }
-    };
-
-    channel.postMessage({ type: 'REQUEST_MASTER_PASS', requestId });
-  });
+export async function getMasterPass(): Promise<string | undefined> {
+  if (_isAurionSessionHost) {
+    return _masterPass;
+  }
+  return findAurionSessionHost()?.getMasterPass();
 }

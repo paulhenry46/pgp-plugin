@@ -20,9 +20,8 @@ import { onAfterLogout } from './hooks/onAfterLogout.ts';
 import {onBeforeComposeOpenToReply, onBeforeComposeOpenToReplyAll, onBeforeComposeOpenToForward} from './hooks/onBeforeComposeOpenTo.ts';
 import { main } from './migrations/2.0.0.ts';
 import {onBeforeEmailSend} from './hooks/onBeforeEmailSend.ts';
-import { activateAurionAPI, initAurionAPI, syncfromAurion } from './aurion/utils.ts';
+import { activateAurionAPI } from './aurion/utils.ts';
 import { Navbar } from './aurion/cryptpad/navRailBottom.tsx';
-import { initAurionBackgroundSessionListener } from './aurion/session-broadcast.ts';
 import { onBeforeLogout } from './aurion/onBeforeLogout.ts';
 
 
