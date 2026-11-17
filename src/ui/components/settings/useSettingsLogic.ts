@@ -16,8 +16,8 @@ import { importOpenPgpPrivateKey, importOpenPgpPublicKey, unlockPrivateKey } fro
 import { encryptPassphraseWithWebAuthn, decryptPassphraseWithWebAuthn, unlockWithWebAuthnRegisteredKeys } from '../../../webauthn/settings.ts';
 
 import { 
-  fetchKeyFromBackground, 
-  broadcastUnlockKey, 
+  isKeyUnlockedInBackground,
+  broadcastUnlockKey,
   broadcastLockKey,
   subscribeToKeyUpdates
 } from '../../../pgp/session-broadcast.ts';
@@ -95,7 +95,7 @@ export function useSettingsLogic() {
     const p: Record<string, boolean> = {};
     const dict = await loadDangerousPassphrases();
     for (const rec of k) {
-      u[rec.id] = !!(await fetchKeyFromBackground(rec.id));
+      u[rec.id] = await isKeyUnlockedInBackground(rec.id);
       p[rec.id] = !!dict[rec.id];
     }
     setUnlocked(u);
@@ -485,7 +485,7 @@ export function useSettingsLogic() {
         host.toast.error(host.i18n.t('settings.error.no_key_found_directory', { email }));
         return;
       }
-      await importOpenPgpPublicKey(armored);
+      await importOpenPgpPublicKey(armored, email);
       host.toast.success(host.i18n.t('settings.success.key_imported', { email }));
       setSearchEmail('');
       await refresh();

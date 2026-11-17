@@ -34,7 +34,8 @@ export async function onRecipientChipsChange(chips: Recipient[]): Promise<Recipi
                 try{
                     const { armored } = await lookup(email);
                     if (armored) {
-                        await importOpenPgpPublicKey(armored);
+                        // Saved for the address looked up, and only if the key carries it.
+                        await importOpenPgpPublicKey(armored, email);
                         missingEmails.delete(email); // Successfully found key, no longer missing
                     } else {
                         await saveRecipient({ email: email, hasNotPublicKey: true });

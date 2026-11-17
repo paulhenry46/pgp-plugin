@@ -83,6 +83,11 @@ export function EmailBanner(props: EmailProps) {
     checkStorage();
     intervalId = window.setInterval(checkStorage, 300);
 
+    const channel = new BroadcastChannel('email_banner_channel');
+    channel.onmessage = (event) => {
+        checkStorage();
+    };
+
     return () => {
       alive = false;
       if (intervalId !== null) clearInterval(intervalId);

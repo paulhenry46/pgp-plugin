@@ -5,14 +5,16 @@ import {
   saveMessageCache, 
   clearAllMessageCache, 
   getPluginsDataForAccount,
-  savePluginData 
+  savePluginData, 
+  DecryptedCachePayload
 } from "../storage.ts";
 import { importOpenPgpPrivateKey, unlockPrivateKey } from "./import.ts";
-import { broadcastUnlockKey, fetchRamIndexFromBackground } from "./session-broadcast.ts";
+import { broadcastUnlockKey } from "./session-broadcast.ts";
 import { deriveSecret } from "./key-utils.ts";
 import { base64ToBuffer, bufferToBase64 } from "../util.ts";
 import * as openpgp from 'openpgp';
 import host from '@plugin-host';
+import { getIndexWithoutBroadcast } from "../cache.ts";
 
 export async function changePassword(keyID: string, oldPassphrase: string, newPassphrase: string) {
   const originalRec = await getKeyRecord(keyID);
@@ -45,8 +47,9 @@ export async function changePassword(keyID: string, oldPassphrase: string, newPa
 
     await saveKeyRecord(updatedRecord, false);
     const unlockedSession = await unlockPrivateKey(updatedRecord, newPassphrase);
-    if (updatedRecord.default && unlockedSession.aesKey) {
-      await changePassphraseForCache(unlockedSession.aesKey, updatedRecord.id);
+    if (updatedRecord.default && unlockedSession.aesKey && oldUnlocked.aesKey) {
+      const currentCache = await getIndexWithoutBroadcast(oldUnlocked.aesKey, updatedRecord)
+      await changePassphraseForCache(currentCache, unlockedSession.aesKey, updatedRecord.id);
     }
     if (updatedRecord.default && oldUnlocked.hmacKey && unlockedSession.hmacKey) {
       await reencryptPluginDataForAccount(updatedRecord.id, oldUnlocked.hmacKey, unlockedSession.hmacKey);
@@ -71,8 +74,7 @@ export async function changePassword(keyID: string, oldPassphrase: string, newPa
   }
 }
 
-async function changePassphraseForCache(newAesKey: CryptoKey, keyRecordId: string) {
-  const decryptedIndex = await fetchRamIndexFromBackground();
+async function changePassphraseForCache(decryptedIndex: Record<string, DecryptedCachePayload>, newAesKey: CryptoKey, keyRecordId: string) {
 
   if (!decryptedIndex || Object.keys(decryptedIndex).length === 0) {
     await clearAllMessageCache();

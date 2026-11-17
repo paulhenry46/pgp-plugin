@@ -6,199 +6,229 @@ import { loadDangerousPassphrases, getKeyRecord } from '../storage.ts';
 import { unlockPrivateKey } from './import.ts'; 
 export const CHANNEL_NAME = 'pgp-session-bus';
 
+// The unlocked keys and the decrypted index live in the background frame,
+// where activate() and every hook run. A BroadcastChannel reaches every
+// script of the webmail's origin, in every tab and worker, not only this
+// plugin's frames: so no key, preview or search result ever travels on the
+// channel, in either direction, and nothing received on it is stored. Code
+// in the background frame reads keys and index directly. A slot frame
+// (settings) hands over a key it unlocked by calling the background frame of
+// its own tab (see SessionHost). The channel carries the "a key changed"
+// notice, the lock request and the custom-secret API.
+let _isSessionHost = false;
 let _backgroundSessionKeys: Record<string, SessionKeysEntry> = {};
 let _ramDecryptedIndex: Record<string, { preview: string, tokens: string[] }> = {};
 
+interface CustomSecretResult {
+  secret: string | null;
+  data?: any;
+}
+
+/**
+ * What the background frame offers the plugin's other frames, as an object
+ * on its own window. Frames of one tab and one origin can call each other,
+ * so nothing is posted anywhere. It takes keys in and answers yes or no: it
+ * has no way to read a key, a preview or a search result back out.
+ */
+interface SessionHost {
+  setKey(keyEntry: SessionKeysEntry): void;
+  isUnlocked(keyId?: string): boolean;
+  initIndex(decryptedIndex: Record<string, DecryptedCachePayload>): void;
+  updateIndexEntry(id: string, payload: DecryptedCachePayload): void;
+  getCustomSecret(salt: string, accountId: string): Promise<CustomSecretResult>;
+  addCustomSecret(salt: string, accountId: string, data: any): Promise<boolean>;
+}
+
+const SESSION_HOST_PROP = '__pgpSessionHost';
+const SESSION_HOST_METHODS = [
+  'setKey',
+  'isUnlocked',
+  'initIndex',
+  'updateIndexEntry',
+  'getCustomSecret',
+  'addCustomSecret',
+] as const;
+
+/**
+ * The background frame of this tab, looked up among the page's frames.
+ *
+ * A window also answers a property name with the element of its document
+ * that has that id or name. The webmail shows a message in a frame of its own
+ * origin (scripts off), so the sender's HTML can put an element called
+ * __pgpSessionHost in front of the real one. Markup cannot make functions:
+ * only an object whose four members are functions is taken, the rest is
+ * skipped.
+ */
+function findSessionHost(): SessionHost | null {
+  let frames: any;
+  try {
+    frames = (globalThis as any).parent?.frames;
+  } catch {
+    return null;
+  }
+  const count = Number(frames?.length) || 0;
+  for (let i = 0; i < count; i++) {
+    try {
+      const candidate = frames[i]?.[SESSION_HOST_PROP];
+      if (candidate && SESSION_HOST_METHODS.every((name) => typeof candidate[name] === 'function')) {
+        return candidate as SessionHost;
+      }
+    } catch {
+      // A frame of another origin: not ours.
+    }
+  }
+  return null;
+}
+
 type SessionMessage =
-  | { type: 'PING_STATUS'; requestId: string }
-  | { type: 'PONG_STATUS'; requestId: string; isUnlocked: boolean }
-  | { type: 'SET_KEY'; keyEntry: SessionKeysEntry }
   | { type: 'KEY_UPDATED'; isUnlocked: boolean }
-  | { type: 'CLEAR_KEY'; id: string }
-  | { type: 'REQUEST_KEY_DATA'; requestId: string; keyId: string }
-  | { type: 'RESPONSE_KEY_DATA'; requestId: string; keyEntry: SessionKeysEntry | null }
-  | { type: 'INITIALIZE_RAM_INDEX'; decryptedIndex: Record<string, DecryptedCachePayload> }
-  | { type: 'GET_RAM_INDEX'; requestId: string }
-  | { type: 'RESPONSE_RAM_INDEX'; requestId: string; decryptedIndex: Record<string, DecryptedCachePayload> }
-  | { type: 'REQUEST_PREVIEWS_BATCH'; requestId: string; emailIds: string[] }
-  | { type: 'RESPONSE_PREVIEWS_BATCH'; requestId: string; previews: Record<string, string> }
-  | { type: 'REQUEST_SEARCH'; requestId: string; query: string }
-  | { type: 'RESPONSE_SEARCH'; requestId: string; matchingIds: string[] }
-  | { type: 'UPDATE_RAM_INDEX_ENTRY'; id: string; payload: DecryptedCachePayload }
-  | { type: 'REQUEST_ADD_CUSTOM_SECRET'; requestId: string; salt: string; accountId: string; data: any }
-  | { type: 'RESPONSE_ADD_CUSTOM_SECRET'; requestId: string; ok: boolean; }
-  | { type: 'REQUEST_CUSTOM_SECRET'; requestId: string; salt: string; accountId: string }
-  | { type: 'RESPONSE_CUSTOM_SECRET'; requestId: string; secret: string | null; data: any | undefined; };
+  | { type: 'CLEAR_KEY'; id: string };
+
+function notifyKeyUpdated(isUnlocked: boolean): void {
+  const channel = new BroadcastChannel(CHANNEL_NAME);
+  channel.postMessage({ type: 'KEY_UPDATED', isUnlocked });
+  channel.close();
+}
 
 export function initBackgroundSessionListener(): void {
+  _isSessionHost = true;
+
+  // structuredClone: what a slot frame hands over is copied into this frame,
+  // so it outlives the slot frame (settings closes, the keys stay).
+  const sessionHost: SessionHost = Object.freeze({
+    setKey(keyEntry: SessionKeysEntry) {
+      _backgroundSessionKeys[keyEntry.id] = structuredClone(keyEntry);
+      notifyKeyUpdated(true);
+    },
+    isUnlocked(keyId?: string) {
+      return keyId ? !!_backgroundSessionKeys[keyId] : Object.keys(_backgroundSessionKeys).length > 0;
+    },
+    initIndex(decryptedIndex: Record<string, DecryptedCachePayload>) {
+      _ramDecryptedIndex = { ..._ramDecryptedIndex, ...structuredClone(decryptedIndex) };
+    },
+    updateIndexEntry(id: string, payload: DecryptedCachePayload) {
+      _ramDecryptedIndex[id] = structuredClone(payload);
+    },
+    async getCustomSecret(salt: string, accountId: string): Promise<CustomSecretResult> {
+      const allKeys = await listKeyRecords();
+      const defaultKey = allKeys.find((k) => k.default === true && k.accountId === accountId);
+
+      if (!defaultKey) {
+        return { secret: null };
+      }
+
+      const hmacKey = _backgroundSessionKeys[defaultKey.id]?.hmacKey;
+      if (!hmacKey) {
+        return { secret: null };
+      }
+
+      const secret = await deriveSecret(hmacKey, salt);
+      const data = await getPluginData(salt, accountId);
+
+      return structuredClone({ secret, data });
+    },
+    async addCustomSecret(salt: string, accountId: string, data: any): Promise<boolean> {
+      try {
+        const allKeys = await listKeyRecords();
+        const defaultKey = allKeys.find((k) => k.default === true && k.accountId === accountId);
+        const unlocked = defaultKey && _backgroundSessionKeys[defaultKey.id]?.hmacKey;
+
+        if (unlocked && !(await getPluginData(salt, accountId))) {
+          await savePluginData(salt, structuredClone(data), accountId);
+          return true;
+        }
+      } catch (e) {
+        console.error('[PGP] Error adding custom secret:', e);
+      }
+      return false;
+    },
+  });
+
+  Object.defineProperty(globalThis, SESSION_HOST_PROP, { value: sessionHost, configurable: true });
+
   const channel = new BroadcastChannel(CHANNEL_NAME);
 
   channel.onmessage = (event: MessageEvent<SessionMessage>) => {
     const msg = event.data;
 
-    switch (msg.type) {
-      case 'PING_STATUS':
-        channel.postMessage({
-          type: 'PONG_STATUS',
-          requestId: msg.requestId,
-          isUnlocked: Object.keys(_backgroundSessionKeys).length > 0
-        });
-        break;
-
-      case 'SET_KEY':
-        _backgroundSessionKeys[msg.keyEntry.id] = msg.keyEntry;
-        channel.postMessage({ type: 'KEY_UPDATED', isUnlocked: true });
-        break;
-
-      case 'CLEAR_KEY':
-        // remove keyId from _backgroundSessionKeys if provided, otherwise clear all keys
-        if (msg.id) {
-          delete _backgroundSessionKeys[msg.id];
-        }else{
-          _backgroundSessionKeys = {};
-        }
-        channel.postMessage({ type: 'KEY_UPDATED', isUnlocked: false });
-        break;
-    
-      case 'REQUEST_KEY_DATA':
-        channel.postMessage({
-          type: 'RESPONSE_KEY_DATA',
-          requestId: msg.requestId,
-          keyEntry: _backgroundSessionKeys[msg.keyId] || null
-        });
-        break;
-
-      case 'INITIALIZE_RAM_INDEX':
-        // add instead of replacing to avoid overwriting existing entries and allowing for multiple keys to contribute to the index
-        _ramDecryptedIndex = { ..._ramDecryptedIndex, ...msg.decryptedIndex };
-        break;
-
-      case 'REQUEST_PREVIEWS_BATCH': {
-        channel.postMessage({
-          type: 'RESPONSE_PREVIEWS_BATCH',
-          requestId: msg.requestId,
-          previews: getPreview(msg.emailIds, _ramDecryptedIndex)
-        });
-        break;
+    if (msg.type === 'CLEAR_KEY') {
+      // remove keyId from _backgroundSessionKeys if provided, otherwise clear all keys
+      if (msg.id) {
+        delete _backgroundSessionKeys[msg.id];
+      } else {
+        _backgroundSessionKeys = {};
       }
-
-      case 'REQUEST_SEARCH': {
-        channel.postMessage({
-          type: 'RESPONSE_SEARCH',
-          requestId: msg.requestId,
-          matchingIds: search(msg.query, _ramDecryptedIndex)
-        });
-        break;
-      }
-      case 'UPDATE_RAM_INDEX_ENTRY':
-      _ramDecryptedIndex[msg.id] = msg.payload;
-      break;
-      case 'REQUEST_CUSTOM_SECRET': {
-
-        (async () => {
-        const allKeys = await listKeyRecords();
-        const defaultKey = allKeys.find((k) => k.default === true && k.accountId === msg.accountId);
-
-          if (!defaultKey) {
-            return;
-          }
-         const hmacKey = _backgroundSessionKeys[defaultKey.id]?.hmacKey;
-         if (!hmacKey) {
-            channel.postMessage({
-              type: 'RESPONSE_CUSTOM_SECRET',
-              requestId: msg.requestId,
-              secret: null
-            });
-            return;
-          }
-        const secret = await deriveSecret(hmacKey, msg.salt);
-        const data = await getPluginData(msg.salt, msg.accountId);
-        
-        channel.postMessage({
-          type: 'RESPONSE_CUSTOM_SECRET',
-          requestId: msg.requestId,
-          secret: secret,
-          data: data
-        });
-        })();
-        break;
-      }
-
-      case 'REQUEST_ADD_CUSTOM_SECRET': {
-        (async () => {
-          let ok = false;
-          try {
-            const allKeys = await listKeyRecords();
-            const defaultKey = allKeys.find(k => k.default === true && k.accountId === msg.accountId);
-            const unlocked = defaultKey && _backgroundSessionKeys[defaultKey.id]?.hmacKey;
-            if (unlocked && !(await getPluginData(msg.salt, msg.accountId))) {
-              await savePluginData(msg.salt, msg.data, msg.accountId); 
-              ok = true;
-            }
-          } catch (e) { console.error(e); }
-          channel.postMessage({ type: 'RESPONSE_ADD_CUSTOM_SECRET', requestId: msg.requestId, ok });
-        })();
-        break;
-      }
+      channel.postMessage({ type: 'KEY_UPDATED', isUnlocked: false });
     }
   };
+}
+
+export async function requestCustomSecret(salt: string, accountId: string): Promise<CustomSecretResult> {
+  const host = _isSessionHost ? (globalThis as any)[SESSION_HOST_PROP] : findSessionHost();
+  if (!host) return { secret: null };
+  return host.getCustomSecret(salt, accountId);
+}
+
+export async function requestAddCustomSecret(salt: string, accountId: string, data: any): Promise<boolean> {
+  const host = _isSessionHost ? (globalThis as any)[SESSION_HOST_PROP] : findSessionHost();
+  if (!host) return false;
+  return host.addCustomSecret(salt, accountId, data);
 }
 
 export function getBackgroundSessionKey(id: string): SessionKeysEntry | null {
   return _backgroundSessionKeys[id] || null;
 }
 
-export function fetchKeyFromBackground(keyId: string): Promise<SessionKeysEntry | null> {
-  return new Promise((resolve) => {
-    const channel = new BroadcastChannel(CHANNEL_NAME);
-    const requestId = Math.random().toString(36).substring(2);
-
-    const timeout = setTimeout(() => {
-      channel.close();
-      resolve(null);
-    }, 300);
-
-    channel.onmessage = (event: MessageEvent<SessionMessage>) => {
-      if (event.data.type === 'RESPONSE_KEY_DATA' && event.data.requestId === requestId) {
-        clearTimeout(timeout);
-        channel.close();
-        resolve(event.data.keyEntry);
-      }
-    };
-
-    channel.postMessage({ type: 'REQUEST_KEY_DATA', requestId, keyId });
-  });
+/**
+ * The unlocked key, for code running in the background frame (hooks). The
+ * key never crosses the channel, so a slot frame gets null: use
+ * isKeyUnlockedInBackground() there.
+ */
+export async function fetchKeyFromBackground(keyId: string): Promise<SessionKeysEntry | null> {
+  return _isSessionHost ? (_backgroundSessionKeys[keyId] || null) : null;
 }
 
-export function checkIsKeyUnlocked(): Promise<boolean> {
-  return new Promise((resolve) => {
-    const channel = new BroadcastChannel(CHANNEL_NAME);
-    const requestId = Math.random().toString(36).substring(2);
-
-    const timeout = setTimeout(() => {
-      channel.close();
-      resolve(false);
-    }, 300);
-
-    channel.onmessage = (event: MessageEvent<SessionMessage>) => {
-      if (event.data.type === 'PONG_STATUS' && event.data.requestId === requestId) {
-        clearTimeout(timeout);
-        channel.close();
-        resolve(event.data.isUnlocked);
-      }
-    };
-
-    channel.postMessage({ type: 'PING_STATUS', requestId });
-  });
+/**
+ * Whether a key is unlocked in the background frame of this tab; safe from
+ * any frame.
+ */
+export async function isKeyUnlockedInBackground(keyId: string): Promise<boolean> {
+  if (_isSessionHost) return !!_backgroundSessionKeys[keyId];
+  return findSessionHost()?.isUnlocked(keyId) ?? false;
 }
 
+export async function checkIsKeyUnlocked(): Promise<boolean> {
+  if (_isSessionHost) return Object.keys(_backgroundSessionKeys).length > 0;
+  return findSessionHost()?.isUnlocked() ?? false;
+}
+
+/**
+ * Hands an unlocked key to the background frame. Unlocked there (startup,
+ * decrypt and send prompts, persisted keys), it is stored directly. Unlocked
+ * in a slot frame (settings), it is passed to the background frame of the
+ * same tab by a direct call. Either way only "a key changed" goes out on the
+ * channel.
+ */
 export function broadcastUnlockKey(keyEntry: SessionKeysEntry): void {
-  const channel = new BroadcastChannel(CHANNEL_NAME);
-  channel.postMessage({ type: 'SET_KEY', keyEntry });
-  channel.close();
+  if (_isSessionHost) {
+    _backgroundSessionKeys[keyEntry.id] = keyEntry;
+    notifyKeyUpdated(true);
+    return;
+  }
+  const sessionHost = findSessionHost();
+  if (!sessionHost) {
+    console.warn('[PGP] No background frame found in this tab: the key stays locked.');
+    return;
+  }
+  sessionHost.setKey(keyEntry);
 }
 
 export function broadcastLockKey(keyId: string): void {
+  if (_isSessionHost) {
+    delete _backgroundSessionKeys[keyId];
+    notifyKeyUpdated(false);
+    return;
+  }
   const channel = new BroadcastChannel(CHANNEL_NAME);
   channel.postMessage({ type: 'CLEAR_KEY', id: keyId });
   channel.close();
@@ -206,97 +236,39 @@ export function broadcastLockKey(keyId: string): void {
 
 export function subscribeToKeyUpdates(callback: (isUnlocked: boolean) => void): () => void {
   const channel = new BroadcastChannel(CHANNEL_NAME);
-  
   channel.onmessage = (event: MessageEvent<SessionMessage>) => {
     if (event.data.type === 'KEY_UPDATED') {
       callback(event.data.isUnlocked);
     }
   };
-
   return () => channel.close();
 }
 
 export function broadcastInitializeRamIndex(decryptedIndex: Record<string, DecryptedCachePayload>): void {
-  const channel = new BroadcastChannel(CHANNEL_NAME);
-  channel.postMessage({ type: 'INITIALIZE_RAM_INDEX', decryptedIndex });
-  channel.close();
+  if (_isSessionHost) {
+    _ramDecryptedIndex = { ..._ramDecryptedIndex, ...decryptedIndex };
+    return;
+  }
+  findSessionHost()?.initIndex(decryptedIndex);
 }
 
-export function fetchRamIndexFromBackground(): Promise<Record<string, DecryptedCachePayload>> {
-  return new Promise((resolve) => {
-    const channel = new BroadcastChannel(CHANNEL_NAME);
-    const requestId = Math.random().toString(36).substring(2);
-
-    const timeout = setTimeout(() => {
-      channel.close();
-      resolve({});
-    }, 1000);
-
-    channel.onmessage = (event: MessageEvent<SessionMessage>) => {
-      if (event.data.type === 'RESPONSE_RAM_INDEX' && event.data.requestId === requestId) {
-        clearTimeout(timeout);
-        channel.close();
-        resolve(event.data.decryptedIndex);
-      }
-    };
-
-    channel.postMessage({ type: 'GET_RAM_INDEX', requestId });
-  });
+// Previews and search read decrypted mail: background frame only (the
+// onEmailsFetched and onSearchResults hooks), never over the channel.
+export async function fetchPreviewsBatchFromBackground(emailIds: string[]): Promise<Record<string, string>> {
+  return _isSessionHost ? getPreview(emailIds, _ramDecryptedIndex) : {};
 }
 
-export function fetchPreviewsBatchFromBackground(emailIds: string[]): Promise<Record<string, string>> {
-  return new Promise((resolve) => {
-    const channel = new BroadcastChannel(CHANNEL_NAME);
-    const requestId = Math.random().toString(36).substring(2);
-
-    const timeout = setTimeout(() => {
-      channel.close();
-      resolve({});
-    }, 300); // Protection anti-blocage
-
-    channel.onmessage = (event: MessageEvent<SessionMessage>) => {
-      const msg = event.data;
-      if (msg.type === 'RESPONSE_PREVIEWS_BATCH' && msg.requestId === requestId) {
-        clearTimeout(timeout);
-        channel.close();
-        resolve(msg.previews);
-      }
-    };
-
-    channel.postMessage({ type: 'REQUEST_PREVIEWS_BATCH', requestId, emailIds });
-  });
-}
-
-export function executeSearchInBackground(query: string): Promise<string[]> {
-  return new Promise((resolve) => {
-    const channel = new BroadcastChannel(CHANNEL_NAME);
-    const requestId = Math.random().toString(36).substring(2);
-
-    const timeout = setTimeout(() => {
-      channel.close();
-      resolve([]);
-    }, 500);
-
-    channel.onmessage = (event: MessageEvent<SessionMessage>) => {
-      const msg = event.data;
-      if (msg.type === 'RESPONSE_SEARCH' && msg.requestId === requestId) {
-        clearTimeout(timeout);
-        channel.close();
-        resolve(msg.matchingIds);
-      }
-    };
-
-    channel.postMessage({ type: 'REQUEST_SEARCH', requestId, query });
-  });
+export async function executeSearchInBackground(query: string): Promise<string[]> {
+  return _isSessionHost ? search(query, _ramDecryptedIndex) : [];
 }
 
 export function broadcastUpdateRamIndexEntry(id: string, payload: DecryptedCachePayload): void {
-  const channel = new BroadcastChannel(CHANNEL_NAME);
-  channel.postMessage({ type: 'UPDATE_RAM_INDEX_ENTRY', id, payload });
-  channel.close();
+  if (_isSessionHost) {
+    _ramDecryptedIndex[id] = payload;
+    return;
+  }
+  findSessionHost()?.updateIndexEntry(id, payload);
 }
-
-
 
 export async function restoreKeysFromDangerousStorage(): Promise<void> {
   if (!settings().StoreDangerous || !(await config('allowPersistentKeys') === true)) return;
@@ -311,23 +283,18 @@ export async function restoreKeysFromDangerousStorage(): Promise<void> {
         if (rec) {
           // This naturally calls `getIndex` inside unlockPrivateKey and loads RAM
           const { unlockedPrivateKey, signingKey, decryptionKey, aesKey, hmacKey } = await unlockPrivateKey(rec, passphrases[keyId], true);
-
           broadcastUnlockKey({ 
-        id: rec.id, 
-        unlockedPrivateKey, 
-        signingKey, 
-        decryptionKey ,
-        aesKey: aesKey,
-        hmacKey: hmacKey
-      });
-
+            id: rec.id, 
+            unlockedPrivateKey, 
+            signingKey, 
+            decryptionKey,
+            aesKey,
+            hmacKey
+          });
         }
       }
-
       // Broadcast unlock status to other listeners
-      const channel = new BroadcastChannel(CHANNEL_NAME);
-      channel.postMessage({ type: 'KEY_UPDATED', isUnlocked: true });
-      channel.close();
+      notifyKeyUpdated(true);
     }
   } catch (err) {
     console.error('Failed to auto-unlock keys from dangerous storage:', err);
