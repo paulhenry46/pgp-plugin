@@ -100,7 +100,7 @@ export async function onRenderEmailBody(body: any, ctx: any): Promise<any | unde
 
 // ── HELPER FUNCTIONS ──
 
-async function loadPublicKeys(fromEmail: string): Promise<any[]> {
+async function loadPublicKeys(fromEmail: string): Promise<openpgp.Key[]> {
   const normalizedEmail = fromEmail.toLowerCase();
   const searchResults = await host.contacts.search(normalizedEmail);
     
@@ -140,7 +140,8 @@ async function loadPublicKeys(fromEmail: string): Promise<any[]> {
       }
     })
   );
-  return knownPublicKeys.filter((key): key is NonNullable<typeof key> => key !== undefined);
+  const result = knownPublicKeys.filter((key): key is NonNullable<typeof key> => key !== undefined)
+  return result;
 }
 
 /**
@@ -152,7 +153,7 @@ async function handleInlineEncrypted(
   detection: any,
   keyRecords: any,
   unlockedKeys: any,
-  knownPublicKeys: any[]
+  knownPublicKeys: openpgp.Key[]
 ) {
   const decoder = new TextDecoder('utf-8');
   let htmlBody = '';
@@ -289,7 +290,7 @@ async function handleMimeEncrypted(
   pgpMessageContent: string,
   keyRecords: any,
   unlockedKeys: any,
-  knownPublicKeys: any[],
+  knownPublicKeys: openpgp.Key[],
   fromEmail: string
 ) {
   let result;
@@ -369,7 +370,7 @@ async function handleMimeEncrypted(
       verification.signatureValid = true;
 
       const signerKeyID = sig.keyID.toHex().toUpperCase();
-      const signingKey = knownPublicKeys.find((key) => key.getKeyID().toHex().toUpperCase() === signerKeyID);
+      const signingKey = knownPublicKeys.find((key) => key.getKeys(sig.keyID).length > 0);
 
       if (signingKey) {
         const keyInfo = await extractKeyInfo(signingKey);

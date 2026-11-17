@@ -86,18 +86,7 @@ export async function pgpVerify(contentBytes: Uint8Array, fromHeader: string, pg
         signatureError = err instanceof Error ? err.message : 'Signature cryptographique invalide';
       }
 
-      // 2. Retrieve the key ID in hexadecimal format for logs or error messages
-      const signerKeyID = sig.keyID.toHex().toUpperCase();
-
-      // 3. To find the signing key, search the 'knownPublicKeys' array
-      //    for the one whose ID matches the signature ID.
-      let signingKey = null;
-      for (const key of knownPublicKeys) {
-        if (key.getKeyID().toHex().toUpperCase() === signerKeyID) {
-          signingKey = key;
-          break;
-        }
-      }
+      const signingKey = knownPublicKeys.find((key) => key.getKeys(sig.keyID).length > 0);
 
       // If the key is among the trusted keys passed as arguments, extract its info
       if (signingKey) {
@@ -139,7 +128,7 @@ export async function pgpVerify(contentBytes: Uint8Array, fromHeader: string, pg
         // Make sure we still have an explicit message.
         signatureValid = false;
         if (!signatureError) {
-          signatureError = `Unknown public key or missing from the local keyring (Key ID: ${signerKeyID}).`;
+          signatureError = `Unknown public key or missing from the local keyring (Key ID: ${sig.keyID.toHex().toUpperCase()}).`;
         }
       }
     } else {
