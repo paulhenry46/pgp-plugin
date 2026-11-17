@@ -119,8 +119,9 @@ export async function importOpenPgpPrivateKey(
  * @param record - The keyRecord extracted from IndexedDB
  * @param passphrase - The storage password defined by the user
  * @param automated - Whether the unlock is automated
+ * @param withoutIndex - Whether to skip index retrieval
  */
-export async function unlockPrivateKey(record: KeyRecord, passphrase: string, automated?: boolean): Promise<UnlockResult> {
+export async function unlockPrivateKey(record: KeyRecord, passphrase: string, automated?: boolean, withoutIndex?: boolean): Promise<UnlockResult> {
   // 1. Dérivation de la clé de déballage pour la clé PGP
   console.log('Unlocking private key for record ID:', record.id);
   let masterKey: CryptoKey | undefined;
@@ -178,7 +179,9 @@ export async function unlockPrivateKey(record: KeyRecord, passphrase: string, au
     }else{
       throw new Error('Cannot derive AES key: missing parameters');
     }
-    await getIndex(aesKey, record);
+    if (!withoutIndex) {
+      await getIndex(aesKey, record);
+    }
   }
 
   return {

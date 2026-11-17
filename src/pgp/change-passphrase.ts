@@ -14,7 +14,7 @@ import { deriveSecret } from "./key-utils.ts";
 import { base64ToBuffer, bufferToBase64 } from "../util.ts";
 import * as openpgp from 'openpgp';
 import host from '@plugin-host';
-import { getIndexWithoutBroadcast } from "../cache.ts";
+import { getIndex, getIndexWithoutBroadcast } from "../cache.ts";
 
 export async function changePassword(keyID: string, oldPassphrase: string, newPassphrase: string) {
   const originalRec = await getKeyRecord(keyID);
@@ -46,13 +46,14 @@ export async function changePassword(keyID: string, oldPassphrase: string, newPa
     }
 
     await saveKeyRecord(updatedRecord);
-    const unlockedSession = await unlockPrivateKey(updatedRecord, newPassphrase);
+    const unlockedSession = await unlockPrivateKey(updatedRecord, newPassphrase, false, true);
     if (updatedRecord.default && unlockedSession.aesKey && oldUnlocked.aesKey) {
       const currentCache = await getIndexWithoutBroadcast(oldUnlocked.aesKey, updatedRecord)
       await changePassphraseForCache(currentCache, unlockedSession.aesKey, updatedRecord.id);
+      await getIndex(unlockedSession.aesKey, updatedRecord);
     }
     if (updatedRecord.default && oldUnlocked.hmacKey && unlockedSession.hmacKey) {
-      await reencryptPluginDataForAccount(updatedRecord.id, oldUnlocked.hmacKey, unlockedSession.hmacKey);
+      await reencryptPluginDataForAccount(updatedRecord.accountId ? updatedRecord.accountId : '', oldUnlocked.hmacKey, unlockedSession.hmacKey);
     }
 
     broadcastUnlockKey({ 
