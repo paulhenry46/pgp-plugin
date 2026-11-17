@@ -530,8 +530,8 @@ export function useSettingsLogic() {
     setBusy(true);
     try {
       const text = new TextDecoder().decode(await file.arrayBuffer());
-      const email = await importOpenPgpPublicKey(text);
-      host.toast.success(host.i18n.t('settings.success.file_imported', { email }));
+      const emails = await importOpenPgpPublicKey(text);
+      host.toast.success(host.i18n.t('settings.success.file_imported', { email: emails[0] }));
       if (certFileRef.current) certFileRef.current.value = '';
       await refresh();
     } catch (err) {

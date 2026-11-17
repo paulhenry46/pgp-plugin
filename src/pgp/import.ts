@@ -197,18 +197,18 @@ export async function unlockPrivateKey(record: KeyRecord, passphrase: string, au
  *   that address, and refused unless one of its User IDs carries it. Without
  *   it (a key the user picked by hand), the key's first User ID is used.
  */
-export async function importOpenPgpPublicKey(armoredPublicKeyText: string, forEmail?: string): Promise<string> {
+export async function importOpenPgpPublicKey(armoredPublicKeyText: string, forEmail?: string): Promise<string[]> {
   const readKey = await openpgp.readKey({ armoredKey: armoredPublicKeyText });
   const info = await extractKeyInfo(readKey);
 
-  let email: string;
+  let targetEmails: string[];
   if (forEmail === undefined) {
-    email = (info.emailAddresses[0] || '').toLowerCase();
-    if (!email) throw new Error('Key has no valid email address associated');
+    targetEmails = info.emailAddresses.map(str => str.toLowerCase());
+    if (targetEmails.length === 0) throw new Error('Key has no valid email address associated');
   } else {
     const bound = keyAddressFor(info.emailAddresses, forEmail);
     if (!bound) throw new Error(`Key has no User ID for ${forEmail}`);
-    email = bound;
+    targetEmails = [bound.toLowerCase()];
   }
 
   // A file can hold more than one key, and only the first is read. A key
@@ -222,14 +222,19 @@ export async function importOpenPgpPublicKey(armoredPublicKeyText: string, forEm
   const base64Key = btoa(binaryString);
   const keyUri = `data:application/pgp-keys;base64,${base64Key}`;
 
-  const searchResults = await contacts.search(email);
-  
-  const existingContact = searchResults.find(c => 
-    c.emails && Object.values(c.emails as Record<string, ContactEmail>).some(e => e.address.toLowerCase() === email)
-  );
+  let existingContact: ContactCard | undefined;
+  for (const email of targetEmails) {
+    const searchResults = await contacts.search(email);
+    
+    existingContact = searchResults.find(c => 
+      c.emails && Object.values(c.emails as Record<string, ContactEmail>).some(e => e.address.toLowerCase() === email)
+    );
 
-  if (existingContact) {
-    const keyId = `pgp_${info.fingerprint || Date.now()}`;
+    if (existingContact) break;
+  }
+
+  const keyId = `pgp_${info.fingerprint || Date.now()}`;
+  if (existingContact && existingContact.id) {
     const updatedCryptoKeys = {
       ...existingContact.cryptoKeys,
       [keyId]: {
@@ -238,23 +243,46 @@ export async function importOpenPgpPublicKey(armoredPublicKeyText: string, forEm
       }
     };
 
-    await contacts.update(existingContact.id, {
-      cryptoKeys: updatedCryptoKeys
-    });
-  } else {
-    const keyId = `pgp_${info.fingerprint || Date.now()}`;
+    // All address exist in the existing contact
+    const existingAddresses = new Set(
+      Object.values(existingContact.emails || {}).map((e: any) => e.address.toLowerCase())
+    );
+
+    const updatedEmails = { ...(existingContact.emails || {}) };
+    let addedCount = 0;
     
+    for (const email of targetEmails) {
+      if (!existingAddresses.has(email)) {
+        const uniqueKey = `email_${Date.now()}_${addedCount++}`;
+        updatedEmails[uniqueKey] = {
+          address: email,
+          pref: Object.keys(updatedEmails).length === 0 ? 1 : undefined,
+        };
+      }
+    }
+
+    await contacts.update(existingContact.id, {
+      cryptoKeys: updatedCryptoKeys,
+      emails: updatedEmails,
+    });
+
+  } else {
+    // Create a new contact with all key address
+    const emailsMap: Record<string, ContactEmail> = {};
+    targetEmails.forEach((email, index) => {
+      const keyName = index === 0 ? 'primary' : `email_${index}`;
+      emailsMap[keyName] = {
+        address: email,
+        pref: index === 0 ? 1 : undefined,
+      };
+    });
+
     const newContact: ContactCard = {
       addressBookIds: {},
       name: {
-        full: info.subject || email,
+        full: info.subject || targetEmails[0],
       },
-      emails: {
-        primary: {
-          address: email,
-          pref: 1,
-        }
-      },
+      emails: emailsMap,
       cryptoKeys: {
         [keyId]: {
           uri: keyUri,
@@ -266,7 +294,7 @@ export async function importOpenPgpPublicKey(armoredPublicKeyText: string, forEm
     await contacts.create(newContact);
   }
 
-  return email;
+  return targetEmails;
 }
 
 // ── Private key encryption / decryption ──────────────────────────────
