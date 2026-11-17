@@ -1,15 +1,15 @@
 {
-  "name": "bulwark-openpgp-true-e2e",
-  "version": "2.0.3",
+  "name": "bulwark-aurion-openpgp-true-e2e",
+  "version": "1.0.0",
   "private": true,
   "type": "module",
   "scripts": {
-    "build": "esbuild ./src/index.tsx --bundle --format=cjs --platform=browser --charset=utf8 --outfile=dist/index.js --external:react --external:react-dom --external:react-dom/client --external:react/jsx-runtime --external:@plugin-host",
-    "dev": "npm run build -- --watch",
-    "test": "node --test test/*.test.mjs",
-    "package": "npm run build && cp manifest.json dist/ && cd dist && zip -X ../pgpe2e.zip manifest.json index.js"
+    "build": "node build.js",
+    "dev": "node build.js --watch",
+    "package": "npm run build && cp manifest.json dist/ && cd dist && zip -X ../aurion_pgpe2e.zip manifest.json index.js"
   },
   "dependencies": {
+    "@serenity-kit/opaque": "^1.1.0",
     "hash-wasm": "^4.12.0",
     "mimetext": "^3.0.28",
     "openpgp": "^6.3.1"

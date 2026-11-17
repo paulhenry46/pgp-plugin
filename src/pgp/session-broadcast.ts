@@ -4,8 +4,7 @@ import { DecryptedCachePayload, getPluginData, listKeyRecords, savePluginData, S
 import { deriveSecret } from './key-utils.ts';
 import { loadDangerousPassphrases, getKeyRecord } from '../storage.ts';
 import { unlockPrivateKey } from './import.ts'; 
-
-const CHANNEL_NAME = 'pgp-session-bus';
+export const CHANNEL_NAME = 'pgp-session-bus';
 
 // The unlocked keys and the decrypted index live in the background frame,
 // where activate() and every hook run. A BroadcastChannel reaches every

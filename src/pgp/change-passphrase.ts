@@ -45,7 +45,7 @@ export async function changePassword(keyID: string, oldPassphrase: string, newPa
       updatedRecord.default = true;
     }
 
-    await saveKeyRecord(updatedRecord);
+    await saveKeyRecord(updatedRecord, false);
     const unlockedSession = await unlockPrivateKey(updatedRecord, newPassphrase);
     if (updatedRecord.default && unlockedSession.aesKey && oldUnlocked.aesKey) {
       const currentCache = await getIndexWithoutBroadcast(oldUnlocked.aesKey, updatedRecord)
