@@ -13,6 +13,7 @@ interface OnboardingFlowProps {
   onGenerate: (name: string, email: string, pass: string) => void;
   onJsonImport: () => void;
   onMigrate: (sourceAccountId: string) => void;
+  showAurionPassphrase: boolean;
 }
 
 interface UnifiedIdentityOption {
@@ -20,7 +21,7 @@ interface UnifiedIdentityOption {
   defaultName: string;
 }
 
-export function OnboardingFlow({ busy, onImportClick, onGenerate, onJsonImport, onMigrate }: OnboardingFlowProps) {
+export function OnboardingFlow({ busy, onImportClick, onGenerate, onJsonImport, onMigrate, showAurionPassphrase }: OnboardingFlowProps) {
   const [step, setStep] = useState<number | 'migration'>(1);
   const [name, setName] = useState<string>('');
   const [email, setEmail] = useState<string>('');
@@ -203,29 +204,29 @@ export function OnboardingFlow({ busy, onImportClick, onGenerate, onJsonImport, 
       ),
 
       h('input', { 
-        type: 'text', 
-        placeholder: 'Full Name', 
-        required: true, 
-        value: name, 
-        onChange: (e: React.ChangeEvent<HTMLInputElement>) => setName(e.target.value), 
-        style: inputStyle 
+        type: 'text',
+        placeholder: 'Full Name',
+        required: true,
+        value: name,
+        onChange: (e: React.ChangeEvent<HTMLInputElement>) => setName(e.target.value),
+        style: inputStyle
       }),
-
-      h('input', { 
+      showAurionPassphrase ?
+      h('input', {
         type: 'password', 
-        placeholder: 'Secure Passphrase', 
+        placeholder: 'Aurion Passphrase', 
         required: true, 
         value: pass, 
         onChange: (e: React.ChangeEvent<HTMLInputElement>) => setPass(e.target.value), 
         style: inputStyle 
-      })
+      }) : ''
     ),
     h('div', { style: { display: 'flex', justifyContent: 'space-between' } },
       h('button', { className: 'composer-btn', disabled: busy, onClick: () => setStep(3) }, 'Back'),
-      h('button', { 
-        className: 'composer-btn', 
-        disabled: busy || !email || !pass, 
-        onClick: () => onGenerate(name, email, pass) 
+      h('button', {
+        className: 'composer-btn',
+        disabled: busy || !email,
+        onClick: () => onGenerate(name, email, pass)
       }, 'Generate & Download Backup')
     )
   );

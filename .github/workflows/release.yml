@@ -24,15 +24,19 @@ jobs:
       - name: Install dependencies
         run: npm ci
 
-      - name: Build and Package ZIP
-        run: npm run package
+      - name: Build project
+        run: npm run build
 
-      - name: Check ZIP exists
-        run: test -f pgpe2e.zip
+      - name: Check build artifacts exist
+        run: |
+          test -f dist/index.js
+          test -f manifest.json
 
-      - name: Upload Release Asset
+      - name: Upload Release Assets
         uses: softprops/action-gh-release@v2
         with:
-          files: pgpe2e.zip
+          files: |
+            dist/index.js
+            manifest.json
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
