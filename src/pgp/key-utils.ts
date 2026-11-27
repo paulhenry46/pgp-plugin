@@ -343,10 +343,34 @@ export async function deriveSecret(hmacKey: CryptoKey, salt: string): Promise<st
     .join('');
 }
 
-export async function recipientKeysFor(emails: string[]): Promise<{
-  found: Record<string, string>;
-  missing: string[];
-}> {
+export type RecipientKeys = { found: Record<string, string>; missing: string[] };
+
+const UNENCRYPTED_SEND_CONSENT_TTL_MS = 10 * 60 * 1000;
+const unencryptedSendConsents = new Map<string, number>();
+
+const recipientSetId = (fromEmail: string, emails: string[]) =>
+  `${String(fromEmail || '').toLowerCase()}|${[...new Set(emails.map((e) => e.toLowerCase()))].sort().join(',')}`;
+
+export function rememberUnencryptedSendConsent(fromEmail: string, emails: string[]): void {
+  const now = Date.now();
+  for (const [id, at] of unencryptedSendConsents) {
+    if (now - at > UNENCRYPTED_SEND_CONSENT_TTL_MS) unencryptedSendConsents.delete(id);
+  }
+  unencryptedSendConsents.set(recipientSetId(fromEmail, emails), now);
+}
+
+export function forgetUnencryptedSendConsent(fromEmail: string, emails: string[]): void {
+  unencryptedSendConsents.delete(recipientSetId(fromEmail, emails));
+}
+
+export function takeUnencryptedSendConsent(fromEmail: string, emails: string[]): boolean {
+  const id = recipientSetId(fromEmail, emails);
+  const at = unencryptedSendConsents.get(id);
+  unencryptedSendConsents.delete(id);
+  return at !== undefined && Date.now() - at <= UNENCRYPTED_SEND_CONSENT_TTL_MS;
+}
+
+export async function recipientKeysFor(emails: string[]): Promise<RecipientKeys> {
   const found: Record<string, string> = {};
   const missing: string[] = [];
 

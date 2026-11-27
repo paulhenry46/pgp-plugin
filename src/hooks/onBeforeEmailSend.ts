@@ -6,7 +6,7 @@ import { unlockPrivateKey } from "../pgp/import.ts";
 import { broadcastUnlockKey } from "../pgp/session-broadcast.ts";
 import { getDefaultPublicKeyForEncryption, getKeyRecord } from "../storage.ts";
 import { emailsOf, unlockedDecryptMaps } from "../util.ts";
-import { recipientKeysFor } from "../pgp/key-utils.ts";
+import { forgetUnencryptedSendConsent, recipientKeysFor, rememberUnencryptedSendConsent, type RecipientKeys } from "../pgp/key-utils.ts";
 import { resolveIntent, signingKeyRecordForEmail } from "./onComposeSend.ts";
 import { config } from "../shared.ts";
 import host from '@plugin-host';
@@ -76,28 +76,42 @@ export async function onBeforeEmailSend(req: any): Promise<boolean> {
     throw new Error('Failed to get required keys for email sending.');
   }
 
-  if (encrypt) {
-    const recipients = [...new Set([...emailsOf(req.to), ...emailsOf(req.cc), ...emailsOf(req.bcc)])];
-    if (recipients.length > 0) {
-      let found: Record<string, string> | null = null;
-      try {
-        found = (await recipientKeysFor(recipients)).found;
-      } catch (err) {
-        host.log.warn('recipient key lookup failed', err);
-      }
+  const recipients = [...new Set([...emailsOf(req.to), ...emailsOf(req.cc), ...emailsOf(req.bcc)])];
+  let unencryptedConfirmed = false;
+  forgetUnencryptedSendConsent(fromEmail, recipients);
 
-      if (!found || Object.keys(found).length === 0) {
-        const continueSending = await host.ui.confirm({
-          title: host.i18n.t('confirm.no_recipient_keys_title'),
-          message: host.i18n.t(found ? 'confirm.no_recipient_keys_message' : 'confirm.recipient_keys_unknown_message'),
-          danger: true,
-          confirmLabel: host.i18n.t('confirm.no_recipient_keys_confirm'),
-        });
+  if (encrypt && recipients.length > 0) {
+    let checkedKeys: RecipientKeys | null = null;
+    try {
+      checkedKeys = await recipientKeysFor(recipients);
+    } catch (err) {
+      host.log.warn('recipient key lookup failed', err);
+    }
 
-        if (!continueSending) {
-          return false;
-        }
+    if (!checkedKeys || Object.keys(checkedKeys.found).length === 0) {
+      const continueSending = await host.ui.confirm({
+        title: host.i18n.t('confirm.no_recipient_keys_title'),
+        message: host.i18n.t(checkedKeys ? 'confirm.no_recipient_keys_message' : 'confirm.recipient_keys_unknown_message'),
+        danger: true,
+        confirmLabel: host.i18n.t('confirm.no_recipient_keys_confirm'),
+      });
+
+      if (!continueSending) {
+        return false;
       }
+      unencryptedConfirmed = true;
+    } else if (checkedKeys.missing.length > 0) {
+      const continueSending = await host.ui.confirm({
+        title: host.i18n.t('confirm.mixed_recipients_title'),
+        message: host.i18n.t('confirm.mixed_recipients_message'),
+        danger: true,
+        confirmLabel: host.i18n.t('confirm.mixed_recipients_confirm'),
+      });
+
+      if (!continueSending) {
+        return false;
+      }
+      unencryptedConfirmed = true;
     }
   }
 
@@ -111,6 +125,10 @@ export async function onBeforeEmailSend(req: any): Promise<boolean> {
   const encryptionUnlocked = await ensureKeyUnlocked(draftEncryptionKeyId, fromEmail, unlockedKeys);
   if (!encryptionUnlocked) {
     return false;
+  }
+
+  if (unencryptedConfirmed) {
+    rememberUnencryptedSendConsent(fromEmail, recipients);
   }
 
   return true;
