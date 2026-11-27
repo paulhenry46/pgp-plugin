@@ -5,7 +5,8 @@
 import { unlockPrivateKey } from "../pgp/import.ts";
 import { broadcastUnlockKey } from "../pgp/session-broadcast.ts";
 import { getDefaultPublicKeyForEncryption, getKeyRecord } from "../storage.ts";
-import { unlockedDecryptMaps } from "../util.ts";
+import { emailsOf, unlockedDecryptMaps } from "../util.ts";
+import { recipientKeysFor } from "../pgp/key-utils.ts";
 import { resolveIntent, signingKeyRecordForEmail } from "./onComposeSend.ts";
 import { config } from "../shared.ts";
 import host from '@plugin-host';
@@ -73,6 +74,31 @@ export async function onBeforeEmailSend(req: any): Promise<boolean> {
 
   if (!signingKeyRecord || !draftEncryptionKeyId) {
     throw new Error('Failed to get required keys for email sending.');
+  }
+
+  if (encrypt) {
+    const recipients = [...new Set([...emailsOf(req.to), ...emailsOf(req.cc), ...emailsOf(req.bcc)])];
+    if (recipients.length > 0) {
+      let found: Record<string, string> | null = null;
+      try {
+        found = (await recipientKeysFor(recipients)).found;
+      } catch (err) {
+        host.log.warn('recipient key lookup failed', err);
+      }
+
+      if (!found || Object.keys(found).length === 0) {
+        const continueSending = await host.ui.confirm({
+          title: host.i18n.t('confirm.no_recipient_keys_title'),
+          message: host.i18n.t(found ? 'confirm.no_recipient_keys_message' : 'confirm.recipient_keys_unknown_message'),
+          danger: true,
+          confirmLabel: host.i18n.t('confirm.no_recipient_keys_confirm'),
+        });
+
+        if (!continueSending) {
+          return false;
+        }
+      }
+    }
   }
 
   const { unlockedKeys } = await unlockedDecryptMaps();
