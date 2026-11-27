@@ -124,9 +124,18 @@ export async function onComposeSend(req: ComposeRequest): Promise<boolean | unde
     host.toast.error(host.i18n.t('prompt.block_until_default_key_is_available.message_sending'));
     return false;
   }
+  let justDecryptedAttachments = false;
 
   const { sign, encrypt } = await resolveIntent(req);
-  if (!sign && !encrypt) return undefined;
+  // if neither signing nor encrypting is requested, and if drafts were not encrypted, we can just let the email go through without any PGP processing.
+  // if drafts are encrypted, we still need to process the email to ensure that the attachments are decrypted before sending.
+  if (!sign && !encrypt){
+    if(!settings().encryptDrafts && !await config('forceDraftAndAttachmentsEncryption')){
+      return undefined;
+    }else{
+      justDecryptedAttachments = true;
+    }
+  }
   if (!(await isCapable())) {
     host.toast.error(host.i18n.t('error.not_privileged_tier'));
     return false;
@@ -211,7 +220,7 @@ export async function onComposeSend(req: ComposeRequest): Promise<boolean | unde
       attachments.splice(0, attachments.length, ...decryptedAttachments);
     }
 
-    if (settings().alwaysSendPubKey && currentKeyRecord?.publicKey) {
+    if (settings().alwaysSendPubKey && currentKeyRecord?.publicKey && !justDecryptedAttachments) {
       attachments.push({
         filename: `${from.addr}_publickey.asc`,
         contentType: 'application/pgp-keys',
@@ -412,11 +421,11 @@ export async function onComposeSend(req: ComposeRequest): Promise<boolean | unde
       await host.jmap.importRaw(bytesArrayBuffer(sentBytes), ['sent']);
     }
 
-    // --- SCÉNARIO C: 0% PGP / Signature only (Zero-Knowledge in Sent) ---
+    // --- SCÉNARIO C: 0% PGP / Signature only (Zero-Knowledge in Sent) + D. Just decrypted attachments ---
     else {
       // C.1: Network envelope (cleartext or signed)
       let networkEnvelopeBlob: Blob;
-      if (sign && signingKeyForPgp) {
+      if (sign && signingKeyForPgp) {// works as well for D because sign = false
         const signatureBlob = await pgpSignDetached(clearMimeBytesWithoutHeaders, signingKeyForPgp);
         const clearMimeBytesBlob = new Blob([clearMimeBytesWithoutHeaders as BlobPart], { type: 'application/octet-stream' });
 
@@ -435,7 +444,7 @@ export async function onComposeSend(req: ComposeRequest): Promise<boolean | unde
         signingKeyForPgp // Signed if requested
       );
 
-      const sentEnvelopeBlob = wrapAsPgpMimeEncrypted(encryptedForSelfBlob, {
+      const sentEnvelopeBlob = justDecryptedAttachments ? networkEnvelopeBlob : wrapAsPgpMimeEncrypted(encryptedForSelfBlob, {
         from, to: req.to, cc: req.cc, bcc: req.bcc, subject: req.subject || '', inReplyTo: req.inReplyTo, references: req.references, messageId
       });
 
@@ -458,6 +467,8 @@ export async function onComposeSend(req: ComposeRequest): Promise<boolean | unde
       host.toast.warning(host.i18n.t('warn.sent_partially_encrypted'));
     } else if (encrypt) {
       host.toast.warning(sign ? host.i18n.t('warn.sent_signed_not_encrypted') : host.i18n.t('warn.sent_not_encrypted'));
+    } else if(justDecryptedAttachments) {
+      host.toast.success(host.i18n.t('success.sent_clear'));
     } else {
       host.toast.success(host.i18n.t('success.sent_signed'));
     }

@@ -208,6 +208,7 @@
       "success.sent_signed_encrypted": "Message signed, encrypted and sent",
       "success.sent_encrypted": "Message encrypted and sent",
       "success.sent_signed": "Message signed and sent",
+      "success.sent_clear": "Message sent unencrypted",
       "warn.sent_partially_encrypted": "Message sent: encrypted for recipients with a public key, unencrypted for the others",
       "warn.sent_not_encrypted": "Message sent unencrypted: no recipient has a public key",
       "warn.sent_signed_not_encrypted": "Message signed and sent unencrypted: no recipient has a public key",

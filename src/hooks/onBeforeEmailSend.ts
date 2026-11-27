@@ -8,7 +8,7 @@ import { getDefaultPublicKeyForEncryption, getKeyRecord } from "../storage.ts";
 import { emailsOf, unlockedDecryptMaps } from "../util.ts";
 import { recipientKeysFor, type RecipientKeys } from "../pgp/key-utils.ts";
 import { resolveIntent, signingKeyRecordForEmail } from "./onComposeSend.ts";
-import { config } from "../shared.ts";
+import { config, settings } from "../shared.ts";
 import host from '@plugin-host';
 
 async function ensureKeyUnlocked(keyId: string, email: string, unlockedKeys: Map<string, any>): Promise<boolean> {
@@ -63,7 +63,8 @@ export async function onBeforeEmailSend(req: any): Promise<boolean> {
   const { sign, encrypt } = await resolveIntent(req);
   if (!sign && !encrypt &&
       (await config('forceEncryption')) !== true &&
-      (await config('blockUntilDefaultKeyIsAvailable')) !== true) {
+      (await config('blockUntilDefaultKeyIsAvailable')) !== true &&
+      !settings().encryptDrafts && !await config('forceDraftAndAttachmentsEncryption')) {
     return true;
   }
 
