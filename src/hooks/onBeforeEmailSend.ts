@@ -6,7 +6,7 @@ import { unlockPrivateKey } from "../pgp/import.ts";
 import { broadcastUnlockKey } from "../pgp/session-broadcast.ts";
 import { getDefaultPublicKeyForEncryption, getKeyRecord } from "../storage.ts";
 import { emailsOf, unlockedDecryptMaps } from "../util.ts";
-import { forgetUnencryptedSendConsent, recipientKeysFor, rememberUnencryptedSendConsent, type RecipientKeys } from "../pgp/key-utils.ts";
+import { recipientKeysFor, type RecipientKeys } from "../pgp/key-utils.ts";
 import { resolveIntent, signingKeyRecordForEmail } from "./onComposeSend.ts";
 import { config } from "../shared.ts";
 import host from '@plugin-host';
@@ -16,7 +16,7 @@ async function ensureKeyUnlocked(keyId: string, email: string, unlockedKeys: Map
     return true;
   }
 
-  while (true) {
+  while (true) {// to allow user to retry if they enter a wrong passphrase
     try {
       const result = await host.ui.prompt({
         title: host.i18n.t('prompt.unlock_key.title'),
@@ -77,8 +77,6 @@ export async function onBeforeEmailSend(req: any): Promise<boolean> {
   }
 
   const recipients = [...new Set([...emailsOf(req.to), ...emailsOf(req.cc), ...emailsOf(req.bcc)])];
-  let unencryptedConfirmed = false;
-  forgetUnencryptedSendConsent(fromEmail, recipients);
 
   if (encrypt && recipients.length > 0) {
     let checkedKeys: RecipientKeys | null = null;
@@ -99,7 +97,6 @@ export async function onBeforeEmailSend(req: any): Promise<boolean> {
       if (!continueSending) {
         return false;
       }
-      unencryptedConfirmed = true;
     } else if (checkedKeys.missing.length > 0) {
       const continueSending = await host.ui.confirm({
         title: host.i18n.t('confirm.mixed_recipients_title'),
@@ -111,7 +108,6 @@ export async function onBeforeEmailSend(req: any): Promise<boolean> {
       if (!continueSending) {
         return false;
       }
-      unencryptedConfirmed = true;
     }
   }
 
@@ -127,9 +123,6 @@ export async function onBeforeEmailSend(req: any): Promise<boolean> {
     return false;
   }
 
-  if (unencryptedConfirmed) {
-    rememberUnencryptedSendConsent(fromEmail, recipients);
-  }
 
   return true;
 }

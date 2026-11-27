@@ -345,30 +345,6 @@ export async function deriveSecret(hmacKey: CryptoKey, salt: string): Promise<st
 
 export type RecipientKeys = { found: Record<string, string>; missing: string[] };
 
-const UNENCRYPTED_SEND_CONSENT_TTL_MS = 10 * 60 * 1000;
-const unencryptedSendConsents = new Map<string, number>();
-
-const recipientSetId = (fromEmail: string, emails: string[]) =>
-  `${String(fromEmail || '').toLowerCase()}|${[...new Set(emails.map((e) => e.toLowerCase()))].sort().join(',')}`;
-
-export function rememberUnencryptedSendConsent(fromEmail: string, emails: string[]): void {
-  const now = Date.now();
-  for (const [id, at] of unencryptedSendConsents) {
-    if (now - at > UNENCRYPTED_SEND_CONSENT_TTL_MS) unencryptedSendConsents.delete(id);
-  }
-  unencryptedSendConsents.set(recipientSetId(fromEmail, emails), now);
-}
-
-export function forgetUnencryptedSendConsent(fromEmail: string, emails: string[]): void {
-  unencryptedSendConsents.delete(recipientSetId(fromEmail, emails));
-}
-
-export function takeUnencryptedSendConsent(fromEmail: string, emails: string[]): boolean {
-  const id = recipientSetId(fromEmail, emails);
-  const at = unencryptedSendConsents.get(id);
-  unencryptedSendConsents.delete(id);
-  return at !== undefined && Date.now() - at <= UNENCRYPTED_SEND_CONSENT_TTL_MS;
-}
 
 export async function recipientKeysFor(emails: string[]): Promise<RecipientKeys> {
   const found: Record<string, string> = {};
@@ -377,7 +353,7 @@ export async function recipientKeysFor(emails: string[]): Promise<RecipientKeys>
   for (const email of emails) {
     const emailLower = email.toLowerCase();
     
-    // 1. Recherche du contact correspondant à l'email
+    // 1. search contacts for a matching email address and retrieve the first PGP key found
     const searchResults = await contacts.search(emailLower);
     const contact: ContactCard | undefined = searchResults.find((c) =>
       c.emails && Object.values(c.emails as Record<string, ContactEmail>).some((e) => e.address.toLowerCase() === emailLower)
@@ -386,7 +362,7 @@ export async function recipientKeysFor(emails: string[]): Promise<RecipientKeys>
     let armoredKey: string | null = null;
 
     if (contact?.cryptoKeys) {
-      // 2. On récupère la première clé PGP valide
+      // 2. we get the first cryptoKey entry that is of type PGP
       const cryptoKeyEntry = Object.values(contact.cryptoKeys).find(
         (key) => key.mediaType === 'application/pgp-keys' || key.uri.startsWith('data:application/pgp-keys')
       );
@@ -400,7 +376,7 @@ export async function recipientKeysFor(emails: string[]): Promise<RecipientKeys>
       }
     }
 
-    // 3. Attribution dans `found` ou `missing`
+    // 3. attribute the found armored key to the email or mark it as missing
     if (armoredKey) {
       found[email] = armoredKey;
     } else {
@@ -412,17 +388,17 @@ export async function recipientKeysFor(emails: string[]): Promise<RecipientKeys>
 }
 
 export function decodePgpUri(uri: string): string {
-  // Cas Data URI Base64
+  // URI Base64
   if (uri.startsWith('data:')) {
     const base64Content = uri.split(',')[1];
     if (!base64Content) return '';
     
-    // Décodage Base64 vers UTF-8 propre
+    //  Base64 to UTF-8
     const binaryString = atob(base64Content);
     const bytes = Uint8Array.from(binaryString, (char) => char.charCodeAt(0));
     return new TextDecoder().decode(bytes);
   }
 
-  // Cas où l'URI contiendrait déjà directement le texte Armored
+  // if URI is not a data URI, return it as is (assuming it's already an armored key)
   return uri;
 }
