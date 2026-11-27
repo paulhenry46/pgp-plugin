@@ -12,7 +12,7 @@ import {emailsOf, bytesArrayBuffer} from '../util.ts';
 import { config, INTENT_KEY, settings} from '../shared.ts';
 import { isCapable } from '../index.tsx';
 import { checkIsKeyUnlocked, fetchKeyFromBackground } from '../pgp/session-broadcast.ts';
-import { keyRecordEmails, recipientKeysFor } from '../pgp/key-utils.ts';
+import { keyRecordEmails, recipientKeysFor, takeUnencryptedSendConsent } from '../pgp/key-utils.ts';
 import { pgpDecrypt } from '../pgp/decrypt.ts';
 
 
@@ -167,6 +167,7 @@ export async function onComposeSend(req: ComposeRequest): Promise<boolean | unde
     let nonPgpRecipients: string[] = [];
     let foundKeys: Record<string, string> = {};
 
+    const unencryptedConfirmed = encrypt && takeUnencryptedSendConsent(from.addr, allRecipientEmails);
     if (encrypt) {
       const { found, missing } = await recipientKeysFor(allRecipientEmails);
       foundKeys = found;
@@ -280,15 +281,17 @@ export async function onComposeSend(req: ComposeRequest): Promise<boolean | unde
     
     // --- SCENARIO B: Mixed (Some PGP recipients, some non-PGP) ---
     else if (encrypt && pgpRecipients.length > 0 && nonPgpRecipients.length > 0) {
-      const continueSending = await host.ui.confirm({
-        title: host.i18n.t('confirm.mixed_recipients_title'),
-        message: host.i18n.t('confirm.mixed_recipients_message'),
-        danger: true,
-        confirmLabel: host.i18n.t('confirm.mixed_recipients_confirm'),
-      });
+      if (!unencryptedConfirmed) {
+        const continueSending = await host.ui.confirm({
+          title: host.i18n.t('confirm.mixed_recipients_title'),
+          message: host.i18n.t('confirm.mixed_recipients_message'),
+          danger: true,
+          confirmLabel: host.i18n.t('confirm.mixed_recipients_confirm'),
+        });
 
-      if (!continueSending) {
-        return false;
+        if (!continueSending) {
+          return false;
+        }
       }
       
       const clearReferences = req.references 
